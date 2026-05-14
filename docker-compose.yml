@@ -1,98 +1,205 @@
-# docker-compose.yml — Yantrix Client Scout Full Stack
-# Includes: API, Postgres, gosom Google Maps Scraper
+# Yantrix Client Scout production stack.
 #
-# Usage:
-#   cp client-scout-api/.env.example client-scout-api/.env  (fill in secrets)
-#   docker compose up -d
+# Default mode expects an external Postgres/Supabase database configured in .env.
+# Enable local Postgres with:
+#   COMPOSE_PROFILES=local-db docker compose up -d
 #
-# Services:
-#   db            – Postgres 16
-#   gmaps-scraper – gosom Google Maps REST API sidecar
-#   api           – FastAPI backend
+# Optional services:
+#   COMPOSE_PROFILES=n8n docker compose up -d
+#   COMPOSE_PROFILES=scrapy docker compose up -d
+#   COMPOSE_PROFILES=local-db,n8n,scrapy docker compose up -d
 
-version: "3.9"
+name: ${COMPOSE_PROJECT_NAME:-yantrix-client-scout}
 
 services:
+  api:
+    build:
+      context: ./client-scout-api
+      dockerfile: Dockerfile
+    image: ${API_IMAGE:-yantrix/client-scout-api:local}
+    container_name: ${API_CONTAINER_NAME:-clientscout-api}
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      APP_NAME: ${APP_NAME:-Yantrix Client Scout API}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      DEBUG: ${DEBUG:-false}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-clientscout}
+      DB_USER: ${DB_USER:-scout}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      GMAPS_SCRAPER_URL: ${GMAPS_SCRAPER_URL:-http://gmaps-scraper:8080}
+      LLM_PROVIDER: ${LLM_PROVIDER:-nvidia}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
+      NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-meta/llama-3.3-70b-instruct}
+      PSI_API_KEY: ${PSI_API_KEY:-}
+      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+      ZOHO_CLIENT_ID: ${ZOHO_CLIENT_ID:-}
+      ZOHO_CLIENT_SECRET: ${ZOHO_CLIENT_SECRET:-}
+      ZOHO_REFRESH_TOKEN: ${ZOHO_REFRESH_TOKEN:-}
+      AUDIT_CONCURRENCY: ${AUDIT_CONCURRENCY:-3}
+      SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
+      SNAPSHOT_BACKEND: ${SNAPSHOT_BACKEND:-local}
+      SNAPSHOT_DIR: ${SNAPSHOT_DIR:-/app/snapshots}
+      JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
+    depends_on:
+      gmaps-scraper:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - api_snapshots:${API_SNAPSHOT_VOLUME_PATH:-/app/snapshots}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - scout
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Postgres
-  # ──────────────────────────────────────────────────────────────────────────
-  db:
-    image: postgres:16-alpine
-    container_name: clientscout-db
+  dashboard:
+    build:
+      context: ./client-scout-dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: ${DASHBOARD_IMAGE:-yantrix/client-scout-dashboard:local}
+    container_name: ${DASHBOARD_CONTAINER_NAME:-clientscout-dashboard}
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-clientscout}
-      POSTGRES_USER: ${DB_USER:-scout}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      # Auto-run schema on first boot
-      - ./client-scout-api/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+      NGINX_PORT: ${DASHBOARD_CONTAINER_PORT:-8080}
     ports:
-      - "5432:5432"
+      - "${DASHBOARD_PORT:-3000}:${DASHBOARD_CONTAINER_PORT:-8080}"
+    depends_on:
+      api:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scout} -d ${DB_NAME:-clientscout}"]
-      interval: 10s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${DASHBOARD_CONTAINER_PORT:-8080}/health || exit 1"]
+      interval: 30s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 10s
+    networks:
+      - scout
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Google Maps Scraper Sidecar
-  # ──────────────────────────────────────────────────────────────────────────
   gmaps-scraper:
-    image: gosom/google-maps-scraper:latest
-    container_name: gmaps-scraper
+    image: ${GMAPS_IMAGE:-gosom/google-maps-scraper:latest}
+    container_name: ${GMAPS_CONTAINER_NAME:-gmaps-scraper}
     restart: unless-stopped
     command:
       - "-data-folder"
       - "/gmapsdata"
+    environment:
+      SCRAPER_CONCURRENCY: ${GMAPS_CONCURRENCY:-2}
     volumes:
       - gmaps_data:/gmapsdata
       - gmaps_playwright_cache:/opt
-    # Port 8080 is exposed to the internal Docker network only.
-    # The API calls http://gmaps-scraper:8080 from inside the network.
     expose:
       - "8080"
+    ports:
+      - "${GMAPS_HOST_PORT:-127.0.0.1:8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/jobs || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+    networks:
+      - scout
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # FastAPI Backend
-  # ──────────────────────────────────────────────────────────────────────────
-  api:
-    build:
-      context: ./client-scout-api
-      dockerfile: Dockerfile
-    container_name: clientscout-api
+  scrapy-worker:
+    image: ${SCRAPY_WORKER_IMAGE:-yantrix/client-scout-scrapy:latest}
+    container_name: ${SCRAPY_WORKER_CONTAINER_NAME:-clientscout-scrapy-worker}
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-      gmaps-scraper:
-        condition: service_healthy
+    profiles:
+      - scrapy
     env_file:
-      - ./client-scout-api/.env
+      - ./.env
     environment:
-      # Override DB host for Docker networking
-      DB_HOST: db
-      GMAPS_SCRAPER_URL: http://gmaps-scraper:8080
+      SCRAPY_PROJECT: ${SCRAPY_PROJECT:-client_scout_scrapers}
+      SCRAPY_SPIDER: ${SCRAPY_SPIDER:-justdial}
+      SCRAPY_LOG_LEVEL: ${SCRAPY_LOG_LEVEL:-INFO}
+      SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-clientscout}
+      DB_USER: ${DB_USER:-scout}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+    command: ["sh", "-c", "${SCRAPY_WORKER_COMMAND:-scrapy crawl justdial}"]
+    networks:
+      - scout
+
+  n8n:
+    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    container_name: ${N8N_CONTAINER_NAME:-clientscout-n8n}
+    restart: unless-stopped
+    profiles:
+      - n8n
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-me-before-production}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Kolkata}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-changeme}
     ports:
-      - "8000:8000"
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - scout
+
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-clientscout-db}
+    restart: unless-stopped
+    profiles:
+      - local-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-clientscout}
+      POSTGRES_USER: ${DB_USER:-scout}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./client-scout-api/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 20s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scout} -d ${DB_NAME:-clientscout}"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+    networks:
+      - scout
+
+networks:
+  scout:
+    driver: bridge
 
 volumes:
-  pgdata:
+  api_snapshots:
     driver: local
   gmaps_data:
     driver: local
   gmaps_playwright_cache:
+    driver: local
+  n8n_data:
+    driver: local
+  pgdata:
     driver: local

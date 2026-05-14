@@ -1,19 +1,22 @@
 """
-api/leads.py — GET /leads, GET /leads/{id}
-
-Returns paginated business leads with nested audit + score data.
-Currently returns realistic stub data; DB integration arrives in Phase 2.
+api/leads.py - DB-backed lead listing and detail endpoints.
 """
 
 import uuid
-from datetime import datetime, timezone
+from math import ceil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.schemas.business import BusinessListItem, BusinessRead
+from app.models.audit import Audit
+from app.models.business import Business
+from app.models.pitch import Pitch
+from app.models.score import Score
 from app.schemas.audit import AuditRead
+from app.schemas.business import BusinessListItem, BusinessRead
 from app.schemas.score import ScoreRead
 from app.services.pitch_generator import (
     BusinessNotFoundError,
@@ -24,62 +27,12 @@ from app.services.pitch_generator import (
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
 
-# ── Stub data ──────────────────────────────────────────────────────────────────
-
-_NOW = datetime.now(timezone.utc)
-
-_STUB_LEADS: list[dict] = [
-    {
-        "id": "11111111-1111-1111-1111-111111111111",
-        "name": "SmileCare Dental Clinic",
-        "category": "dental",
-        "city": "Pune",
-        "website_url": "http://smilecare-dental.in",
-        "source": "google_maps",
-        "overall_score": 38,
-        "has_website": True,
-        "created_at": _NOW,
-    },
-    {
-        "id": "22222222-2222-2222-2222-222222222222",
-        "name": "GlowUp Salon & Spa",
-        "category": "beauty",
-        "city": "Bangalore",
-        "website_url": None,
-        "source": "google_maps",
-        "overall_score": 12,
-        "has_website": False,
-        "created_at": _NOW,
-    },
-    {
-        "id": "33333333-3333-3333-3333-333333333333",
-        "name": "Horizon Realty",
-        "category": "real_estate",
-        "city": "Mumbai",
-        "website_url": "https://horizonrealty.com",
-        "source": "csv",
-        "overall_score": 72,
-        "has_website": True,
-        "created_at": _NOW,
-    },
-]
-
-
-class PaginatedLeads:
-    pass
-
-
-# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.get(
     "",
     response_model=dict,
     status_code=status.HTTP_200_OK,
     summary="List all leads with optional filters",
-    description=(
-        "Returns paginated business leads. Supports filtering by city, "
-        "category, source, and minimum score. DB query wired in Phase 2."
-    ),
 )
 async def list_leads(
     city: str | None = Query(None, description="Filter by city name"),
@@ -89,34 +42,51 @@ async def list_leads(
     sort: str = Query("score_desc", description="Sort order: score_desc | score_asc | created_at_desc"),
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    # TODO (Phase 2): Replace with real DB query + filters
-    filtered = _STUB_LEADS
+    filters = _lead_filters(city=city, category=category, source=source, min_score=min_score)
 
-    if city:
-        filtered = [l for l in filtered if l.get("city", "").lower() == city.lower()]
-    if category:
-        filtered = [l for l in filtered if l.get("category", "").lower() == category.lower()]
-    if source:
-        filtered = [l for l in filtered if l.get("source", "").lower() == source.lower()]
-    if min_score is not None:
-        filtered = [l for l in filtered if (l.get("overall_score") or 0) >= min_score]
+    count_stmt = (
+        select(func.count(Business.id))
+        .select_from(Business)
+        .outerjoin(Audit, Audit.business_id == Business.id)
+        .outerjoin(Score, Score.business_id == Business.id)
+        .where(*filters)
+    )
+    total = await db.scalar(count_stmt) or 0
 
-    if sort == "score_desc":
-        filtered = sorted(filtered, key=lambda x: x.get("overall_score") or 0, reverse=True)
-    elif sort == "score_asc":
-        filtered = sorted(filtered, key=lambda x: x.get("overall_score") or 0)
+    stmt = (
+        select(Business, Audit.has_website, Score.overall_score)
+        .outerjoin(Audit, Audit.business_id == Business.id)
+        .outerjoin(Score, Score.business_id == Business.id)
+        .where(*filters)
+        .order_by(*_lead_sort(sort))
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
 
-    total = len(filtered)
-    start = (page - 1) * limit
-    paginated = filtered[start : start + limit]
+    items = [
+        BusinessListItem(
+            id=business.id,
+            name=business.name,
+            category=business.category,
+            city=business.city,
+            website_url=business.website_url,
+            source=business.source,
+            overall_score=overall_score,
+            has_website=has_website,
+            created_at=business.created_at,
+        )
+        for business, has_website, overall_score in rows
+    ]
 
     return {
         "total": total,
         "page": page,
         "limit": limit,
-        "pages": max(1, (total + limit - 1) // limit),
-        "items": [BusinessListItem(**l) for l in paginated],
+        "pages": max(1, ceil(total / limit)) if total else 1,
+        "items": items,
     }
 
 
@@ -125,7 +95,6 @@ async def list_leads(
     response_model=dict,
     status_code=status.HTTP_200_OK,
     summary="Regenerate pitch for a lead",
-    description="Generates and saves a fresh 2-3 line AI pitch for a scored lead.",
 )
 async def regenerate_pitch(
     lead_id: uuid.UUID,
@@ -156,79 +125,96 @@ async def regenerate_pitch(
     response_model=dict,
     status_code=status.HTTP_200_OK,
     summary="Get full lead detail",
-    description="Returns a single lead with full audit signals and LLM score/pitch notes.",
 )
-async def get_lead(lead_id: uuid.UUID) -> dict:
-    # TODO (Phase 2): Fetch from DB with joined audit + score
-    stub_audit = AuditRead(
-        id=uuid.uuid4(),
-        business_id=lead_id,
-        url_checked="http://smilecare-dental.in",
-        has_website=True,
-        ssl_valid=False,
-        mobile_friendly=False,
-        has_forms=False,
-        has_cta=True,
-        has_whatsapp=False,
-        has_booking=False,
-        has_chatbot=False,
-        load_time_ms=4200,
-        page_speed_score=31,
-        has_title=True,
-        has_meta_desc=False,
-        has_h1=True,
-        has_og_tags=False,
-        has_facebook=True,
-        has_instagram=False,
-        has_linkedin=False,
-        has_twitter=False,
-        tech_stack=["wordpress", "php"],
-        screenshot_url=None,
-        status="completed",
-        error_message=None,
-        audited_at=_NOW,
+async def get_lead(
+    lead_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(Business)
+        .options(selectinload(Business.audit), selectinload(Business.score))
+        .where(Business.id == lead_id)
     )
-    stub_score = ScoreRead(
-        id=uuid.uuid4(),
-        business_id=lead_id,
-        overall_score=38,
-        website_quality=30,
-        online_presence=45,
-        conversion_readiness=20,
-        urgency=55,
-        pitch_notes=(
-            "- Website loads slowly (4.2s) and has no SSL — immediate red flag for patients.\n"
-            "- No WhatsApp button or online booking — losing mobile leads daily.\n"
-            "- No meta description means Google is ignoring them in local search."
-        ),
-        recommended_services=[
-            "Website Speed Optimisation",
-            "WhatsApp Chat Integration",
-            "Online Booking Widget",
-            "Local SEO Package",
-        ],
-        objection_handlers=(
-            "1. 'We get referrals' → 72% of patients search online before choosing a clinic.\n"
-            "2. 'Too expensive' → Lost bookings each month cost more than our setup fee."
-        ),
-        llm_provider="groq",
-        llm_model="llama-3.3-70b-versatile",
-        scored_at=_NOW,
-    )
+    business = result.scalar_one_or_none()
+    if business is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found.")
 
-    return {
-        "id": str(lead_id),
-        "name": "SmileCare Dental Clinic",
-        "category": "dental",
-        "city": "Pune",
-        "website_url": "http://smilecare-dental.in",
-        "source": "google_maps",
-        "phone": "+91-98765-43210",
-        "email": None,
-        "rating": 4.2,
-        "review_count": 87,
-        "created_at": _NOW,
-        "updated_at": _NOW,
-        "audit": stub_audit,
-        "score": stub_score,
-    }
+    pitch = await _latest_pitch(lead_id, db)
+    data = BusinessRead(
+        id=business.id,
+        name=business.name,
+        category=business.category,
+        niche=business.niche,
+        address=business.address,
+        city=business.city,
+        state=business.state,
+        country=business.country,
+        phone=business.phone,
+        email=business.email,
+        website_url=business.website_url,
+        google_maps_url=business.google_maps_url,
+        rating=float(business.rating) if business.rating is not None else None,
+        review_count=business.review_count,
+        source=business.source,
+        discovery_job_id=business.discovery_job_id,
+        created_at=business.created_at,
+        updated_at=business.updated_at,
+        audit=AuditRead.model_validate(business.audit) if business.audit else None,
+        score=_score_read(business.score, pitch) if business.score else None,
+    )
+    return data.model_dump(mode="json")
+
+
+def _lead_filters(
+    *,
+    city: str | None,
+    category: str | None,
+    source: str | None,
+    min_score: int | None,
+) -> list:
+    filters = []
+    if city:
+        filters.append(func.lower(Business.city) == city.lower())
+    if category:
+        filters.append(func.lower(Business.category) == category.lower())
+    if source:
+        filters.append(func.lower(Business.source) == source.lower())
+    if min_score is not None:
+        filters.append(Score.overall_score >= min_score)
+    return filters
+
+
+def _lead_sort(sort: str) -> tuple:
+    if sort == "score_asc":
+        return (asc(Score.overall_score).nulls_last(), desc(Business.created_at))
+    if sort == "created_at_desc":
+        return (desc(Business.created_at),)
+    return (desc(Score.overall_score).nulls_last(), desc(Business.created_at))
+
+
+async def _latest_pitch(lead_id: uuid.UUID, db: AsyncSession) -> Pitch | None:
+    result = await db.execute(
+        select(Pitch)
+        .where(Pitch.business_id == lead_id)
+        .order_by(Pitch.generated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def _score_read(score: Score, pitch: Pitch | None) -> ScoreRead:
+    return ScoreRead(
+        id=score.id,
+        business_id=score.business_id,
+        overall_score=score.overall_score,
+        website_quality=score.website_quality,
+        online_presence=score.online_presence,
+        conversion_readiness=score.conversion_readiness,
+        urgency=score.urgency,
+        pitch_notes=pitch.pitch_notes if pitch else None,
+        recommended_services=pitch.recommended_services if pitch else None,
+        objection_handlers=pitch.objection_handlers if pitch else None,
+        llm_provider=score.llm_provider,
+        llm_model=score.llm_model,
+        scored_at=score.scored_at,
+    )

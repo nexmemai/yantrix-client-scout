@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, SmallInteger, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +32,7 @@ class NicheConfig(Base):
     weight_booking: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=20)
     weight_social: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10)
     weight_seo: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10)
+    weights: Mapped[dict | None] = mapped_column(JSONB)
 
     prompt_template: Mapped[str | None] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -37,6 +37,8 @@ CREATE TYPE audit_status AS ENUM (
 );
 
 CREATE TYPE llm_provider AS ENUM (
+    'rule_engine',
+    'nvidia',
     'groq',
     'nvidia_nim',
     'openai'  -- reserved for future use
@@ -193,6 +195,14 @@ CREATE TABLE niche_configs (
     weight_booking      SMALLINT NOT NULL DEFAULT 20 CHECK (weight_booking BETWEEN 0 AND 100),
     weight_social       SMALLINT NOT NULL DEFAULT 10 CHECK (weight_social BETWEEN 0 AND 100),
     weight_seo          SMALLINT NOT NULL DEFAULT 10 CHECK (weight_seo BETWEEN 0 AND 100),
+    weights             JSONB NOT NULL DEFAULT '{
+        "weak_website": 20,
+        "lead_capture_gap": 25,
+        "outdated_contact": 10,
+        "high_ticket": 20,
+        "trust_gap": 10,
+        "automation_gap": 15
+    }'::jsonb,
 
     -- LLM prompt customisation per niche
     prompt_template     TEXT,

@@ -21,6 +21,7 @@ from app.services.scoring import (
     bucket_for_score,
     compute_gap_breakdown,
     score_business,
+    weights_from_config,
 )
 
 
@@ -149,6 +150,23 @@ def make_config(*, niche: str, is_default: bool = False) -> NicheConfig:
         display_name=niche.title(),
         is_default=is_default,
     )
+
+
+def test_weights_from_config_overrides_gap_weights_per_key():
+    config = make_config(niche="dental")
+    config.weights = {
+        WEAK_WEBSITE: 5,
+        LEAD_CAPTURE_GAP: 30,
+        "unknown": 100,
+        TRUST_GAP: -1,
+    }
+
+    weights = weights_from_config(config)
+
+    assert weights[WEAK_WEBSITE] == 5
+    assert weights[LEAD_CAPTURE_GAP] == 30
+    assert weights[TRUST_GAP] == DEFAULT_GAP_WEIGHTS[TRUST_GAP]
+    assert "unknown" not in weights
 
 
 def test_bucket_for_score_boundaries():

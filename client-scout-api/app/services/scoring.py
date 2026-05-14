@@ -99,7 +99,7 @@ async def score_business(
         return None
 
     niche_config = await _load_niche_config(business.niche, db)
-    weights = DEFAULT_GAP_WEIGHTS.copy()
+    weights = weights_from_config(niche_config)
     breakdown = compute_gap_breakdown(business, audit, weights)
     total_score = min(100, max(0, sum(breakdown.values())))
     fit_bucket = bucket_for_score(total_score)
@@ -149,6 +149,19 @@ def compute_gap_breakdown(
         TRUST_GAP: active_weights[TRUST_GAP] if has_trust_gap(business, audit) else 0,
         AUTOMATION_GAP: active_weights[AUTOMATION_GAP] if has_automation_gap(audit) else 0,
     }
+
+
+def weights_from_config(config: NicheConfig | None) -> dict[str, int]:
+    """Return complete gap weights, falling back per-key to defaults."""
+    weights = DEFAULT_GAP_WEIGHTS.copy()
+    if config is None or not config.weights:
+        return weights
+
+    for key in DEFAULT_GAP_WEIGHTS:
+        value = config.weights.get(key)
+        if isinstance(value, int) and 0 <= value <= 100:
+            weights[key] = value
+    return weights
 
 
 def bucket_for_score(total_score: int) -> str:

@@ -9,16 +9,12 @@ interface ConfigsPageProps {
 }
 
 const emptyWeights: ConfigWeights = {
-  has_website: 5,
-  mobile_friendly: 15,
-  has_forms: 15,
-  has_cta: 10,
-  has_whatsapp: 10,
-  has_booking: 15,
-  ssl_valid: 5,
-  page_speed: 10,
-  seo_basics: 10,
-  social_presence: 5,
+  weak_website: 20,
+  lead_capture_gap: 25,
+  outdated_contact: 10,
+  high_ticket: 20,
+  trust_gap: 10,
+  automation_gap: 15,
 };
 
 export function ConfigsPage({ session }: ConfigsPageProps) {

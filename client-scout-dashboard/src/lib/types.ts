@@ -84,16 +84,12 @@ export interface PaginatedLeads {
 }
 
 export interface ConfigWeights {
-  has_website: number;
-  mobile_friendly: number;
-  has_forms: number;
-  has_cta: number;
-  has_whatsapp: number;
-  has_booking: number;
-  ssl_valid: number;
-  page_speed: number;
-  seo_basics: number;
-  social_presence: number;
+  weak_website: number;
+  lead_capture_gap: number;
+  outdated_contact: number;
+  high_ticket: number;
+  trust_gap: number;
+  automation_gap: number;
 }
 
 export interface NicheConfig {

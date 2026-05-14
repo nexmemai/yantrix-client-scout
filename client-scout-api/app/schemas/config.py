@@ -1,5 +1,5 @@
 """
-schemas/config.py — Pydantic schemas for ScoringConfig.
+schemas/config.py - Pydantic schemas for niche scoring config.
 """
 
 import uuid
@@ -7,32 +7,23 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Default weights that sum to 100
 DEFAULT_WEIGHTS = {
-    "has_website": 5,
-    "mobile_friendly": 15,
-    "has_forms": 15,
-    "has_cta": 10,
-    "has_whatsapp": 10,
-    "has_booking": 15,
-    "ssl_valid": 5,
-    "page_speed": 10,
-    "seo_basics": 10,
-    "social_presence": 5,
+    "weak_website": 20,
+    "lead_capture_gap": 25,
+    "outdated_contact": 10,
+    "high_ticket": 20,
+    "trust_gap": 10,
+    "automation_gap": 15,
 }
 
 
 class ScoringWeights(BaseModel):
-    has_website: int = Field(5, ge=0, le=100)
-    mobile_friendly: int = Field(15, ge=0, le=100)
-    has_forms: int = Field(15, ge=0, le=100)
-    has_cta: int = Field(10, ge=0, le=100)
-    has_whatsapp: int = Field(10, ge=0, le=100)
-    has_booking: int = Field(15, ge=0, le=100)
-    ssl_valid: int = Field(5, ge=0, le=100)
-    page_speed: int = Field(10, ge=0, le=100)
-    seo_basics: int = Field(10, ge=0, le=100)
-    social_presence: int = Field(5, ge=0, le=100)
+    weak_website: int = Field(20, ge=0, le=100)
+    lead_capture_gap: int = Field(25, ge=0, le=100)
+    outdated_contact: int = Field(10, ge=0, le=100)
+    high_ticket: int = Field(20, ge=0, le=100)
+    trust_gap: int = Field(10, ge=0, le=100)
+    automation_gap: int = Field(15, ge=0, le=100)
 
 
 class ScoringConfigRead(BaseModel):
@@ -40,7 +31,7 @@ class ScoringConfigRead(BaseModel):
 
     id: uuid.UUID
     niche: str
-    weights: dict
+    weights: dict[str, int]
     prompt_template: str | None = None
     is_default: bool
     created_at: datetime
@@ -49,5 +40,6 @@ class ScoringConfigRead(BaseModel):
 
 class ScoringConfigUpdate(BaseModel):
     """Body for PUT /configs/{niche}."""
+
     weights: ScoringWeights
     prompt_template: str | None = None

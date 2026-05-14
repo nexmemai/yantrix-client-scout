@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-python.vscode-pylance",
+    "rangav.vscode-thunder-client",
+    "ms-azuretools.vscode-docker",
+    "ms-playwright.playwright",
+    "mikestead.dotenv",
+    "mtxr.sqltools",
+    "mtxr.sqltools-driver-pg",
+    "mechatroner.rainbow-csv",
+    "eamodio.gitlens",
+    "usernamehw.errorlens"
+  ]
+}

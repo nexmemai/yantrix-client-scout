@@ -1,0 +1,10 @@
+name: Tech Stack Guardrails
+description: Enforces the strict technology stack for the Yantrix Client Scout project.
+condition: When planning architecture, choosing libraries, or creating new components.
+instructions:
+  - "NEVER use a different language or framework. The backend MUST be FastAPI (Python 3.11+)."
+  - "The database MUST be PostgreSQL (Supabase-compatible schema) using async SQLAlchemy."
+  - "Scraping MUST utilize gosom/google-maps-scraper (Docker sidecar) or Playwright/BeautifulSoup. Avoid standard synchronous requests/Selenium."
+  - "LLM inference MUST use Groq API (primary) or NVIDIA NIM API (fallback). Do not use paid OpenAI/Anthropic APIs unless explicitly requested."
+  - "Deployment MUST target Oracle Cloud Free Tier A1 Flex (ARM64) using Docker Compose."
+  - "Refer to the 'yantrix-client-scout-arch' skill for the complete architectural blueprint."

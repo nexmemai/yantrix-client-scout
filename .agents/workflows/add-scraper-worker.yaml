@@ -1,0 +1,11 @@
+name: Add Scraper Worker
+description: Workflow to safely add a new scraping or auditing worker pipeline.
+triggers:
+  - "When asked to implement a new data source, scraper, or audit check."
+steps:
+  1. "Read Skills: Review 'yantrix-scraping-playbook' for ethics and technical constraints."
+  2. "Implement Client: Create the HTTP client (using `httpx`) or browser logic (using `async_playwright`) in `app/services/`."
+  3. "Apply Limits: Wrap the core scraping function with an `asyncio.Semaphore` to restrict concurrency."
+  4. "Error Handling: Wrap network calls in `try/except` blocks. Log failures but do not let individual row failures crash the entire background task."
+  5. "Data Normalization: Map the scraped output strictly to the existing `BusinessBase` or `AuditRead` Pydantic schemas."
+  6. "Integration Test: Run a manual test against a single known URL to verify extraction logic."

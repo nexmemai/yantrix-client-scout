@@ -1,0 +1,12 @@
+name: Repo Architecture and Delivery
+description: Enforces how changes should fit into the existing FastAPI codebase and what complete delivery looks like.
+condition: When adding features, fixing bugs, or refactoring backend pipeline code.
+instructions:
+  - "Reuse the existing repository structure unless there is a concrete reason to change it: `app/api`, `app/services`, `app/models`, `app/schemas`, `migrations`, and `tests`."
+  - "Keep route handlers thin. Put business logic in `app/services/`."
+  - "Treat discovery, audit, scoring, pitch generation, and export as separate pipeline stages with explicit boundaries."
+  - "Design for async execution, background processing, and conservative resource usage suitable for Oracle Cloud Free Tier A1 Flex."
+  - "Implement production-leaning code, not placeholder scaffolding, unless the request explicitly asks for scaffolding."
+  - "When a change affects data contracts, update ORM models, Pydantic schemas, API responses, and tests together."
+  - "When a change affects runtime behavior, also update relevant config, migrations, Docker assumptions, or docs."
+  - "Call out material conflicts between the current code and `ARCHITECTURE.md` instead of silently drifting from the intended design."

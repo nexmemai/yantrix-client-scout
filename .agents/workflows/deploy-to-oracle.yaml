@@ -1,0 +1,13 @@
+name: Deploy to Oracle Cloud
+description: Workflow and checklist for deploying the stack to the Oracle A1 Flex instance.
+triggers:
+  - "When asked to deploy, update production, or push to Oracle Cloud."
+steps:
+  1. "Read Skills: Review 'yantrix-oracle-deploy' to recall the architecture constraints (ARM64)."
+  2. "Verify Dependencies: Ensure all newly added packages in `requirements.txt` compile on ARM64/Linux."
+  3. "Audit Secrets: Ensure no `.env` files are accidentally committed or included in the Docker build context."
+  4. "Test Build: Run `docker compose build` locally to verify Dockerfiles compile without errors."
+  5. "Server Update: SSH into the Oracle VM, `git pull` the latest changes."
+  6. "Migrate DB: Run Alembic migrations on the production database."
+  7. "Restart Services: Run `docker compose up -d --build` on the server to apply changes."
+  8. "Health Check: Verify the deployment by hitting the `/health` endpoint over HTTPS."

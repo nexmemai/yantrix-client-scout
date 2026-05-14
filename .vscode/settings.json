@@ -1,0 +1,56 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/client-scout-api/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "./client-scout-api"
+  ],
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  },
+  "ruff.interpreter": [
+    "${workspaceFolder}/client-scout-api/.venv/Scripts/python.exe"
+  ],
+  "errorLens.enabledDiagnosticLevels": [
+    "error",
+    "warning"
+  ],
+  "errorLens.excludeBySource": [
+    "cSpell",
+    "Grammarly"
+  ],
+  "sqltools.connections": [
+    {
+      "name": "Local Client Scout (Postgres)",
+      "driver": "PostgreSQL",
+      "server": "localhost",
+      "port": 5432,
+      "database": "clientscout",
+      "username": "scout",
+      "askForPassword": true
+    }
+  ],
+  "files.associations": {
+    "*.env*": "dotenv"
+  },
+  "playwright.reuseBrowser": true,
+  "gitlens.codeLens.enabled": true,
+  "antigravity.model.chat": "gemini-3.1-pro-high",
+  "antigravity.model.editor": "claude-4.6-sonnet",
+  "antigravity.agent.reviewDrivenDevelopment": "strict",
+  "antigravity.mcp.toolApprovals": {
+    "git": "auto",
+    "fetch": "auto",
+    "docker": "auto",
+    "postgres": "auto",
+    "playwright": "auto",
+    "terminal": "auto"
+  },
+  "antigravity.knowledge.indexing": true,
+  "antigravity.knowledge.workspaceInstructions": "Always read ARCHITECTURE.md and check the .agent/skills/ and .agents/rules/ directories before proposing any solutions.",
+  "antigravity.browser.headless": false,
+  "antigravity.browser.record": true
+}

@@ -1,0 +1,98 @@
+# docker-compose.yml — Yantrix Client Scout Full Stack
+# Includes: API, Postgres, gosom Google Maps Scraper
+#
+# Usage:
+#   cp client-scout-api/.env.example client-scout-api/.env  (fill in secrets)
+#   docker compose up -d
+#
+# Services:
+#   db            – Postgres 16
+#   gmaps-scraper – gosom Google Maps REST API sidecar
+#   api           – FastAPI backend
+
+version: "3.9"
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Postgres
+  # ──────────────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: clientscout-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-clientscout}
+      POSTGRES_USER: ${DB_USER:-scout}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Auto-run schema on first boot
+      - ./client-scout-api/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scout} -d ${DB_NAME:-clientscout}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Google Maps Scraper Sidecar
+  # ──────────────────────────────────────────────────────────────────────────
+  gmaps-scraper:
+    image: gosom/google-maps-scraper:latest
+    container_name: gmaps-scraper
+    restart: unless-stopped
+    command:
+      - "-data-folder"
+      - "/gmapsdata"
+    volumes:
+      - gmaps_data:/gmapsdata
+      - gmaps_playwright_cache:/opt
+    # Port 8080 is exposed to the internal Docker network only.
+    # The API calls http://gmaps-scraper:8080 from inside the network.
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/jobs || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # FastAPI Backend
+  # ──────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./client-scout-api
+      dockerfile: Dockerfile
+    container_name: clientscout-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      gmaps-scraper:
+        condition: service_healthy
+    env_file:
+      - ./client-scout-api/.env
+    environment:
+      # Override DB host for Docker networking
+      DB_HOST: db
+      GMAPS_SCRAPER_URL: http://gmaps-scraper:8080
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
+    driver: local
+  gmaps_data:
+    driver: local
+  gmaps_playwright_cache:
+    driver: local

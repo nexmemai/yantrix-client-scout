@@ -1,0 +1,13 @@
+name: Implement Client Scout Feature
+description: Default workflow for shipping a Yantrix Client Scout feature end to end inside the current stack.
+triggers:
+  - "When asked to add, extend, or fix a Client Scout backend feature."
+  - "When asked to implement part of the discovery, audit, scoring, pitch, jobs, export, or dashboard API flow."
+steps:
+  1. "Inspect first: read the relevant code paths plus `ARCHITECTURE.md` and `CODEX_PROMPT.md` before making assumptions."
+  2. "Place changes in the existing structure: route contract in `app/api`, business logic in `app/services`, storage changes in `app/models` and `migrations`, validation in `app/schemas`."
+  3. "Keep the pipeline stage boundaries explicit. Do not collapse discovery, audit, and scoring logic into a single route handler."
+  4. "If the feature changes stored data or API payloads, update models, schemas, and endpoint responses together."
+  5. "If the feature depends on external providers or background execution, add env-driven config and preserve Docker and Oracle single-VM assumptions."
+  6. "Add or update tests for the affected behavior, especially API contracts and deterministic business logic."
+  7. "Run the relevant validation steps available in the repo, such as tests or Ruff, and surface any gaps if full verification is not possible."

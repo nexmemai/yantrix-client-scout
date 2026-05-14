@@ -1,0 +1,10 @@
+name: Code Style and Safety
+description: Enforces code formatting, typing, and security best practices.
+condition: When writing, modifying, or reviewing code.
+instructions:
+  - "Python code MUST be formatted and linted using Ruff."
+  - "Use strict Python type hints for all function signatures and variables."
+  - "SECURITY: NEVER hardcode API keys, passwords, or secrets. All configuration MUST be loaded from environment variables via Pydantic Settings."
+  - "All database interactions MUST be asynchronous (e.g., using asyncpg and async session makers). Do not use blocking DB calls."
+  - "Log errors comprehensively using the standard logging module. Do not swallow exceptions silently."
+  - "Refer to the 'yantrix-backend-style' skill for exact directory layout and coding patterns."

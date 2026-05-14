@@ -1,0 +1,11 @@
+name: Product Mission and Boundaries
+description: Keeps work aligned with the Yantrix Client Scout product mission and data-collection limits.
+condition: When planning, implementing, or reviewing product behavior for discovery, auditing, scoring, pitch generation, or exports.
+instructions:
+  - "The product mission is to discover local businesses, audit their public websites, score them by niche, generate short pitch notes, and expose the results through clean internal APIs and dashboard-ready data."
+  - "Optimize for the core pipeline: discover -> normalize -> persist -> audit -> score -> pitch -> export."
+  - "ONLY collect public business information such as business name, address, public phone/email/contact details, public website URL, and public listing metadata."
+  - "NEVER collect end-customer PII, employee PII beyond business-contact information intentionally exposed for business use, or any authenticated/private data."
+  - "NEVER bypass logins, CAPTCHAs, or access controls."
+  - "When behavior is ambiguous, prioritize correctness of lead data, reliability of the pipeline, and maintainability over feature breadth."
+  - "Refer to `CODEX_PROMPT.md` and `ARCHITECTURE.md` when product intent or scope is unclear."

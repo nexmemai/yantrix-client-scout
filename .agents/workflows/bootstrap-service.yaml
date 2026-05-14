@@ -1,0 +1,12 @@
+name: Bootstrap Service or Module
+description: Workflow to scaffold a new backend service or major module correctly.
+triggers:
+  - "When asked to create a new service, router, or major backend component."
+steps:
+  1. "Read Skills: Review 'yantrix-client-scout-arch' and 'yantrix-backend-style' to understand the project structure."
+  2. "Scaffold ORM: If data storage is needed, create the SQLAlchemy model in `app/models/` and add it to `app/models/__init__.py`."
+  3. "Scaffold Schemas: Create the corresponding Pydantic validation schemas in `app/schemas/`."
+  4. "Scaffold Logic: Implement the business logic in `app/services/`. Ensure functions are `async`."
+  5. "Scaffold API: Create the route handlers in `app/api/` and mount the router in `app/main.py`."
+  6. "Write Tests: Create a basic unit test in the `tests/` directory."
+  7. "Check Types: Run `ruff check` and ensure type hints are complete."

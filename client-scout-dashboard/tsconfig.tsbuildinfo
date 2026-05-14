@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/api/client.ts","./src/components/appshell.tsx","./src/components/authgate.tsx","./src/components/signalpill.tsx","./src/lib/types.ts","./src/lib/utils.ts","./src/pages/configspage.tsx","./src/pages/leaddetailpage.tsx","./src/pages/leadspage.tsx"],"version":"5.9.3"}

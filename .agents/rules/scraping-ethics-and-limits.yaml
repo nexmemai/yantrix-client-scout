@@ -1,0 +1,9 @@
+name: Scraping Ethics and Limits
+description: Ensures scraping operations are safe, legal, and respectful of target servers.
+condition: When writing or executing any scraping, crawling, or auditing logic.
+instructions:
+  - "ETHICS: ONLY extract publicly available business information (Name, Address, Public Email, Phone, Category, Website)."
+  - "PRIVACY: NEVER attempt to scrape or store Personally Identifiable Information (PII) of customers or individual employees."
+  - "RATE LIMITING: You MUST implement strict concurrency limits using `asyncio.Semaphore`. Never launch unbounded parallel requests."
+  - "JITTER: Add random delays (jitter) between requests to avoid triggering anti-bot protections or overwhelming target servers."
+  - "Refer to the 'yantrix-scraping-playbook' skill for detailed implementation guidelines."

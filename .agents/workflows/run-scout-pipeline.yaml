@@ -1,0 +1,11 @@
+name: Run Scout Pipeline (Local Test)
+description: One-click workflow to test the full end-to-end discovery and auditing pipeline locally.
+triggers:
+  - "When asked to test the pipeline, run a scout, or verify end-to-end functionality."
+steps:
+  1. "Start Infrastructure: Run `docker compose up -d db gmaps-scraper` to ensure dependencies are live."
+  2. "Start API: Run the FastAPI dev server locally (`uvicorn app.main:app --reload`)."
+  3. "Trigger Scout: Send a POST request to `/api/v1/run-scout` with a test query (e.g., 'dental clinics in Pune'). Capture the `job_id`."
+  4. "Poll Status: Periodically GET `/api/v1/jobs/{job_id}` until the status is 'completed'."
+  5. "Verify Output: GET `/api/v1/leads` to confirm businesses were discovered, audited, and scored."
+  6. "Cleanup: Optionally spin down docker containers if testing is complete."

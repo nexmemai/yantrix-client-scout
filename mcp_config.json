@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-playwright"],
+      "env": {}
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "POSTGRES_URL": "postgresql://scout:changeme@localhost:5432/clientscout"
+      }
+    },
+    "docker": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-docker"],
+      "env": {
+        "DOCKER_HOST": "npipe:////./pipe/docker_engine"
+      }
+    },
+    "git": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git", "c:/Users/doesi/Yantrix Client Scout"],
+      "env": {}
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "env": {}
+    }
+  }
+}

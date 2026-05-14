@@ -1,0 +1,10 @@
+name: Scoring and Pitch Generation
+description: Constrains how lead scoring and AI-generated pitch notes should be designed.
+condition: When implementing or modifying scoring logic, niche configs, LLM integrations, or pitch generation.
+instructions:
+  - "Lead scoring MUST be deterministic first: use configurable niche-specific weights over observed audit and discovery signals before involving an LLM."
+  - "LLMs should improve explanation quality, summaries, and pitch-note wording; they must not replace the core weighted scoring logic."
+  - "Preferred providers are Groq as primary and NVIDIA NIM as fallback. Do not introduce paid LLM providers unless explicitly requested."
+  - "Pitch notes must be short, concrete, and business-outcome focused."
+  - "Pitch notes and summaries MUST be grounded only in observed public signals. Do not invent missing facts or overstate certainty."
+  - "If a signal is missing or inconclusive, phrase the output conservatively rather than fabricating a claim."

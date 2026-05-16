@@ -76,7 +76,7 @@ class GmapsScraperClient:
     def __init__(self) -> None:
         settings = get_settings()
         self._base_url = settings.GMAPS_SCRAPER_URL.rstrip("/")
-        self._timeout = httpx.Timeout(30.0, read=60.0)
+        self._timeout = httpx.Timeout(60.0, read=300.0)
 
     # ------------------------------------------------------------------
     # Public API
@@ -91,12 +91,11 @@ class GmapsScraperClient:
         :param depth: Pagination depth (1 = first page only; increase for more results)
         """
         payload = {
-            "queries": [query],
-            "options": {
-                "depth": depth,
-                "lang": "en",
-                "fast_mode": True,   # skip reviews, prioritise speed
-            },
+            "name": f"scout_{query[:40].replace(' ', '_')}",
+            "keywords": [query],
+            "lang": "en",
+            "depth": depth,
+            "max_time": 180,
         }
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(f"{self._base_url}/api/v1/jobs", json=payload)
@@ -123,8 +122,8 @@ class GmapsScraperClient:
     async def wait_for_results(
         self,
         job_id: str,
-        poll_interval: float = 10.0,
-        max_wait: float = 600.0,
+        poll_interval: float = 15.0,
+        max_wait: float = 900.0,
     ) -> list[GmapsRawBusiness]:
         """
         Poll until the job is complete, then return parsed results.
@@ -159,10 +158,9 @@ class GmapsScraperClient:
             # Normalise: accept both "Status" and "status" keys; coerce to str
             raw_state = status.get("status") or status.get("Status") or ""
             state: str = str(raw_state).strip().lower()
-
             logger.debug("Job %s status: %s (%.0fs elapsed)", job_id, state, elapsed)
 
-            if state == "completed":
+            if state in ("completed", "ok"):
                 return await self.download_results_csv(job_id)
             if state in ("failed", "cancelled", "error"):
                 raise RuntimeError(f"Gosom job {job_id} ended with status: {state}")

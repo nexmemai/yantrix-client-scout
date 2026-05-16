@@ -3,13 +3,18 @@ api/leads.py - DB-backed lead listing and detail endpoints.
 """
 
 import uuid
+import logging
+from datetime import datetime, timezone
 from math import ceil
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
+from app.api.lead_queries import lead_filters
 from app.database import get_db
 from app.models.audit import Audit
 from app.models.business import Business
@@ -26,6 +31,7 @@ from app.services.pitch_generator import (
 )
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -37,14 +43,27 @@ router = APIRouter(prefix="/leads", tags=["Leads"])
 async def list_leads(
     city: str | None = Query(None, description="Filter by city name"),
     category: str | None = Query(None, description="Filter by business category"),
+    niche: str | None = Query(None, description="Filter by niche key"),
+    bucket: str | None = Query(None, description="Filter by score bucket: high | mid | low"),
+    created_after: datetime | None = Query(None, description="Only leads created after this timestamp"),
     source: str | None = Query(None, description="Filter by discovery source"),
+    search: str | None = Query(None, description="Case-insensitive business name search"),
     min_score: int | None = Query(None, ge=0, le=100, description="Minimum overall score"),
     sort: str = Query("score_desc", description="Sort order: score_desc | score_asc | created_at_desc"),
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    filters = _lead_filters(city=city, category=category, source=source, min_score=min_score)
+    filters = lead_filters(
+        city=city,
+        category=category,
+        niche=niche,
+        bucket=bucket,
+        created_after=created_after,
+        source=source,
+        search=search,
+        min_score=min_score,
+    )
 
     count_stmt = (
         select(func.count(Business.id))
@@ -120,6 +139,59 @@ async def regenerate_pitch(
     }
 
 
+@router.post(
+    "/{lead_id}/webhook",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Send the latest lead payload to a CRM webhook",
+)
+async def send_lead_webhook(
+    lead_id: uuid.UUID,
+    webhook_url: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    settings = get_settings()
+    result = await db.execute(select(Business).where(Business.id == lead_id))
+    business = result.scalar_one_or_none()
+    if business is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found.")
+
+    target_url = webhook_url or business.webhook_url or settings.LEAD_WEBHOOK_DEFAULT_URL
+    if not target_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook URL is not configured.")
+
+    pitch = await _latest_pitch(lead_id, db)
+    payload = {
+        "business_id": str(business.id),
+        "name": business.name,
+        "niche": business.niche,
+        "category": business.category,
+        "city": business.city,
+        "phone": business.phone,
+        "email": business.email,
+        "website_url": business.website_url,
+        "source": business.source,
+        "pitch": pitch.pitch_notes if pitch else None,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(target_url, json=payload)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        business.last_sync_at = datetime.now(timezone.utc)
+        business.last_sync_status = f"failed: {exc!s}"[:255]
+        await db.commit()
+        logger.warning("Lead webhook failed lead_id=%s url=%s error=%s", lead_id, target_url, exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Webhook delivery failed.") from exc
+
+    business.webhook_url = target_url
+    business.last_sync_at = datetime.now(timezone.utc)
+    business.last_sync_status = f"success:{response.status_code}"
+    await db.commit()
+    return {"status": "sent", "business_id": str(lead_id), "status_code": response.status_code}
+
+
 @router.get(
     "/{lead_id}",
     response_model=dict,
@@ -163,25 +235,6 @@ async def get_lead(
         score=_score_read(business.score, pitch) if business.score else None,
     )
     return data.model_dump(mode="json")
-
-
-def _lead_filters(
-    *,
-    city: str | None,
-    category: str | None,
-    source: str | None,
-    min_score: int | None,
-) -> list:
-    filters = []
-    if city:
-        filters.append(func.lower(Business.city) == city.lower())
-    if category:
-        filters.append(func.lower(Business.category) == category.lower())
-    if source:
-        filters.append(func.lower(Business.source) == source.lower())
-    if min_score is not None:
-        filters.append(Score.overall_score >= min_score)
-    return filters
 
 
 def _lead_sort(sort: str) -> tuple:

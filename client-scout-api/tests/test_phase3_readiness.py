@@ -9,6 +9,8 @@ from app.api.configs import delete_config, get_config, list_configs, upsert_conf
 from app.api.export import export_leads
 from app.api.jobs import get_job, list_jobs
 from app.api.leads import get_lead, list_leads
+from app.api.reports import get_report
+from app.api.run_scout import _enforce_hourly_run_limit
 from app.models.audit import Audit
 from app.models.business import Business
 from app.models.config import NicheConfig
@@ -194,7 +196,11 @@ async def test_list_leads_uses_db_rows():
     response = await list_leads(
         city=None,
         category=None,
+        niche="dental",
+        bucket="mid",
+        created_after=NOW,
         source=None,
+        search="Smile",
         min_score=None,
         sort="score_desc",
         page=1,
@@ -328,3 +334,45 @@ async def test_json_export_returns_dry_run_ready_items():
     assert response.status == "dry_run"
     assert response.lead_count == 1
     assert response.items[0].pitch_notes == "Add WhatsApp and booking automation."
+
+
+@pytest.mark.asyncio
+async def test_format_json_export_returns_array():
+    business = make_business()
+    audit = make_audit(business.id)
+    score = make_score(business.id, audit.id)
+    pitch = make_pitch(business.id, score.id)
+    session = FakeSession(results=[FakeResult(rows=[(business, True, 72, "B", pitch)])])
+    payload = ExportRequest(format="json", niche="dental", city="Pune", bucket="high")
+
+    response = await export_leads(payload, db=session)
+
+    assert response.status_code == 200
+    assert response.body
+
+
+@pytest.mark.asyncio
+async def test_hourly_run_limit_rejects_at_cap():
+    session = FakeSession(scalars=[2])
+
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_hourly_run_limit("dental", "Pune", NOW, 2, session)
+
+    assert exc.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_report_endpoint_renders_html():
+    business = make_business()
+    audit = make_audit(business.id)
+    score = make_score(business.id, audit.id)
+    pitch = make_pitch(business.id, score.id)
+    business.audit = audit
+    business.score = score
+    session = FakeSession(results=[FakeResult(scalar=business), FakeResult(scalar=pitch)])
+
+    response = await get_report(business.id, db=session)
+
+    assert response.status_code == 200
+    assert "Yantrix Client Scout report" in response.body.decode()
+    assert "WhatsApp inquiry automation" in response.body.decode()

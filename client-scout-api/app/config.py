@@ -8,6 +8,7 @@ Use `Settings()` anywhere via the cached `get_settings()` dependency.
 from functools import lru_cache
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,9 +27,18 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
-    # ── CORS ─────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins, e.g. http://localhost:3000
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: List[str] | str = ["http://localhost:3000"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        elif isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
 
     # ── Database ─────────────────────────────────────────────────────
     DB_HOST: str = "localhost"
@@ -69,6 +79,8 @@ class Settings(BaseSettings):
     ZOHO_CLIENT_ID: str = ""
     ZOHO_CLIENT_SECRET: str = ""
     ZOHO_REFRESH_TOKEN: str = ""
+    LEAD_WEBHOOK_DEFAULT_URL: str = ""
+    RUN_SCOUT_HOURLY_LIMIT: int = 10
 
     # ── Worker concurrency ────────────────────────────────────────────
     AUDIT_CONCURRENCY: int = 5   # max parallel Playwright browsers

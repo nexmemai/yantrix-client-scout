@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.api import audit_site, configs, export, jobs, leads, run_scout
+from app.api import audit_site, configs, export, jobs, leads, reports, run_scout
 
 settings = get_settings()
 
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(configs.router, prefix=PREFIX)
     app.include_router(jobs.router, prefix=PREFIX)
     app.include_router(export.router, prefix=PREFIX)
+    app.include_router(reports.router, prefix=PREFIX)
 
     return app
 

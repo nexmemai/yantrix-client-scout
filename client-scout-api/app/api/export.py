@@ -7,10 +7,11 @@ import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.lead_queries import lead_filters
 from app.database import get_db
 from app.models.audit import Audit
 from app.models.business import Business
@@ -27,12 +28,14 @@ async def export_leads(
     db: AsyncSession = Depends(get_db),
 ) -> ExportResponse | StreamingResponse:
     items = await _load_export_items(payload, db)
-    if payload.destination == "csv":
+    if payload.resolved_destination == "json" and payload.format is not None:
+        return JSONResponse(content=[item.model_dump(mode="json") for item in items])
+    if payload.resolved_destination == "csv":
         return _csv_response(items)
 
     return ExportResponse(
-        destination=payload.destination,
-        status="ready" if payload.destination == "json" else "dry_run",
+        destination=payload.resolved_destination,
+        status="ready" if payload.resolved_destination == "json" else "dry_run",
         lead_count=len(items),
         items=items,
     )
@@ -67,7 +70,9 @@ async def _load_export_items(payload: ExportRequest, db: AsyncSession) -> list[E
             name=business.name,
             city=business.city,
             niche=business.niche,
+            category=business.category,
             stage=business.stage,
+            source=business.source,
             phone=business.phone,
             email=business.email,
             website_url=business.website_url,
@@ -77,6 +82,7 @@ async def _load_export_items(payload: ExportRequest, db: AsyncSession) -> list[E
             has_website=has_website,
             overall_score=overall_score,
             score_band=score_band,
+            created_at=business.created_at,
             pitch_notes=pitch.pitch_notes if pitch else None,
             recommended_services=pitch.recommended_services if pitch else None,
             subject_line=pitch.subject_line if pitch else None,
@@ -91,21 +97,31 @@ def _export_filters(payload: ExportRequest) -> list:
         filters.append(Business.id.in_(payload.lead_ids))
 
     if payload.filters is None:
+        filters.extend(
+            lead_filters(
+                city=payload.city,
+                niche=payload.niche,
+                score_min=payload.score_min,
+                bucket=payload.bucket,
+            )
+        )
         return filters
 
     export_filters = payload.filters
-    if export_filters.city:
-        filters.append(func.lower(Business.city) == export_filters.city.lower())
-    if export_filters.niche:
-        filters.append(func.lower(Business.niche) == export_filters.niche.lower())
-    if export_filters.min_score is not None:
-        filters.append(Score.overall_score >= export_filters.min_score)
+    filters.extend(
+        lead_filters(
+            city=export_filters.city,
+            niche=export_filters.niche,
+            score_min=export_filters.min_score,
+            bucket=payload.bucket,
+        )
+    )
     if export_filters.stage:
         filters.append(Business.stage == export_filters.stage)
     if export_filters.unexported_only:
-        if payload.destination == "hubspot":
+        if payload.resolved_destination == "hubspot":
             filters.append(or_(Pitch.id.is_(None), Pitch.exported_to_hubspot.is_(False)))
-        elif payload.destination == "zoho":
+        elif payload.resolved_destination == "zoho":
             filters.append(or_(Pitch.id.is_(None), Pitch.exported_to_zoho.is_(False)))
 
     return filters
@@ -120,7 +136,9 @@ def _csv_response(items: list[ExportLeadItem]) -> StreamingResponse:
             "name",
             "city",
             "niche",
+            "category",
             "stage",
+            "source",
             "phone",
             "email",
             "website_url",
@@ -129,8 +147,9 @@ def _csv_response(items: list[ExportLeadItem]) -> StreamingResponse:
             "review_count",
             "has_website",
             "overall_score",
-            "score_band",
+            "bucket",
             "pitch_notes",
+            "created_at",
             "recommended_services",
             "subject_line",
         ],
@@ -139,6 +158,8 @@ def _csv_response(items: list[ExportLeadItem]) -> StreamingResponse:
     for item in items:
         row = item.model_dump(mode="json")
         row["recommended_services"] = ", ".join(item.recommended_services or [])
+        row["bucket"] = item.bucket
+        row.pop("score_band", None)
         writer.writerow(row)
 
     buffer.seek(0)

@@ -8,12 +8,14 @@ discover -> audit -> score -> pitch.
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.job import DiscoveryJob
 from app.services.audit_worker import run_audit_for_business
@@ -24,7 +26,7 @@ from app.services.scoring import HIGH_FIT_BUCKET, MID_FIT_BUCKET, score_business
 router = APIRouter(prefix="/run-scout", tags=["Scout"])
 logger = logging.getLogger(__name__)
 
-PIPELINE_BATCH_CAP = 50
+PIPELINE_BATCH_CAP = 100
 PITCHABLE_BUCKETS = {HIGH_FIT_BUCKET, MID_FIT_BUCKET}
 
 _PIPELINE_SEM: asyncio.Semaphore | None = None
@@ -63,7 +65,6 @@ class RunScoutRequest(BaseModel):
     max_businesses: int = Field(
         PIPELINE_BATCH_CAP,
         ge=1,
-        le=PIPELINE_BATCH_CAP,
         description=f"Max businesses to process (cap: {PIPELINE_BATCH_CAP})",
     )
     auto_audit: bool = Field(True, description="Run website audit for each business")
@@ -140,6 +141,26 @@ async def run_scout(
     db: AsyncSession = Depends(get_db),
 ) -> PipelineSummary:
     started_at = datetime.now(tz=timezone.utc)
+    if payload.max_businesses > PIPELINE_BATCH_CAP:
+        logger.warning(
+            "run-scout rejected max_businesses limit niche=%s city=%s requested=%d",
+            payload.niche,
+            payload.city,
+            payload.max_businesses,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"max_businesses must be <= {PIPELINE_BATCH_CAP}.",
+        )
+
+    settings = get_settings()
+    await _enforce_hourly_run_limit(
+        payload.niche,
+        payload.city,
+        started_at,
+        settings.RUN_SCOUT_HOURLY_LIMIT,
+        db,
+    )
     job = DiscoveryJob(
         id=uuid.uuid4(),
         query=f"{payload.niche} in {payload.city}",
@@ -330,3 +351,36 @@ def _finalize_job(
     job.total_scored = summary.scored
     job.completed_at = completed_at
     job.updated_at = completed_at
+
+
+async def _enforce_hourly_run_limit(
+    niche: str,
+    city: str,
+    now: datetime,
+    hourly_limit: int,
+    db: AsyncSession,
+) -> None:
+    """Reject excessive run-scout calls for the same niche/city pair."""
+    if hourly_limit <= 0:
+        return
+
+    window_start = now - timedelta(hours=1)
+    stmt = (
+        select(func.count(DiscoveryJob.id))
+        .where(func.lower(DiscoveryJob.niche) == niche.lower())
+        .where(func.lower(DiscoveryJob.city) == city.lower())
+        .where(DiscoveryJob.created_at >= window_start)
+    )
+    recent_runs = await db.scalar(stmt) or 0
+    if recent_runs >= hourly_limit:
+        logger.warning(
+            "run-scout rejected hourly limit niche=%s city=%s recent_runs=%d cap=%d",
+            niche,
+            city,
+            recent_runs,
+            hourly_limit,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Hourly run limit reached for {niche} in {city}.",
+        )

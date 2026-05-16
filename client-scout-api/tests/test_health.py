@@ -25,6 +25,9 @@ def test_run_scout_returns_summary(monkeypatch):
     business_id = "11111111-1111-1111-1111-111111111111"
 
     class FakeSession:
+        async def scalar(self, _stmt):
+            return 0
+
         def add(self, _obj):
             return None
 
@@ -72,6 +75,15 @@ def test_run_scout_returns_summary(monkeypatch):
     assert data["scored"] == 1
     assert data["pitched"] == 1
     assert data["high_fit_lead_ids"] == [business_id]
+
+
+def test_run_scout_rejects_oversized_request():
+    response = client.post(
+        "/api/v1/run-scout",
+        json={"niche": "dental", "city": "Pune", "max_businesses": 101},
+    )
+
+    assert response.status_code == 400
 
 
 def test_audit_site_returns_200():

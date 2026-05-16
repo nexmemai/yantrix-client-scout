@@ -13,7 +13,7 @@ Public API:
 Concurrency:
     The module exposes a module-level _SEMAPHORE that gates parallel
     Playwright browser launches. Set AUDIT_CONCURRENCY in env (default: 3).
-    This prevents OOM on the Oracle A1 Flex (24GB RAM).
+    This prevents OOM on the AWS t3.micro (1GB RAM).
 
 Usage (from a background task or queue worker):
     from app.services.audit_worker import run_audit_for_business

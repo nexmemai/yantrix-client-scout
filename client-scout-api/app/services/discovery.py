@@ -58,7 +58,7 @@ async def discover_businesses(
     :param db:          Async SQLAlchemy session (injected by caller).
     :param job:         Optional DiscoveryJob ORM row to update progress.
     :param depth:       gosom depth (1 page ≈ 20 results; depth 5 ≈ 100).
-    :param max_results: Cap total results to protect RAM on Oracle Free Tier.
+    :param max_results: Cap total results to protect RAM on AWS t3.micro (1GB).
 
     :returns: List of newly inserted business UUIDs (duplicates excluded).
     """

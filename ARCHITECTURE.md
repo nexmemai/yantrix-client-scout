@@ -10,7 +10,7 @@ Internal engine that discovers local businesses, audits their websites, scores t
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                    Oracle Cloud A1 Flex VM                        │
+│                      AWS EC2 t3.micro VM                         │
 │                      (Docker Compose)                            │
 │                                                                  │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
@@ -455,16 +455,16 @@ Return ONLY valid JSON matching this schema:
 
 ---
 
-## 8. Deployment Plan — Oracle Cloud Free Tier
+## 8. Deployment Plan — AWS EC2 Free Tier
 
 ### Infrastructure
 
-| Resource | Oracle Free Tier | Usage |
+| Resource | AWS Free Tier | Usage |
 |----------|-----------------|-------|
-| **Compute** | A1 Flex (4 OCPU, 24GB RAM) | All containers |
-| **Boot Volume** | 200GB | Docker volumes, gmapsdata |
-| **Network** | 10TB egress/month | More than enough |
-| **OS** | Ubuntu 22.04 (Canonical) | Docker host |
+| **Compute** | t3.micro (1 vCPU, 1GB RAM) | All containers |
+| **EBS Volume** | 30GB | Docker volumes, gmapsdata |
+| **Network** | 100GB egress/month | Webhooks and exports |
+| **OS** | Ubuntu 22.04 LTS | Docker host |
 
 ### Docker Compose
 
@@ -533,50 +533,40 @@ volumes:
   gmapsdata:
 ```
 
-### Resource Allocation (4 OCPU / 24GB)
+### Resource Allocation (1 vCPU / 1GB RAM) - Strict Constraint
 
 ```
-API:             1.5 OCPU, 4GB   (FastAPI + Playwright browsers)
-GMaps Scraper:   1.0 OCPU, 4GB   (Go binary + headless Chrome)
-PostgreSQL:      0.5 OCPU, 2GB
-Dashboard:       0.25 OCPU, 1GB  (static serve)
-Nginx:           0.25 OCPU, 512MB
-System/OS:       0.5 OCPU, 2GB
+API:             0.4 vCPU, 400MB (FastAPI + 1-2 Playwright browsers max)
+GMaps Scraper:   0.3 vCPU, 200MB (Go binary + headless Chrome)
+PostgreSQL:      0.2 vCPU, 200MB
+Nginx/Dashboard: 0.1 vCPU, 100MB
 ────────────────────────────────
-Total:           4.0 OCPU, ~13.5GB (headroom: 10.5GB for bursts)
+Total:           1.0 vCPU, ~900MB (headroom: 100MB for OS/Docker)
 ```
 
 ### Setup Script
 
 ```bash
 #!/bin/bash
-# setup-oracle-vm.sh
+# setup-aws-vm.sh
 
 # 1. Install Docker
 sudo apt update && sudo apt install -y docker.io docker-compose-plugin
 sudo usermod -aG docker $USER
 
-# 2. Open firewall ports
-sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT
-
-# 3. Clone repo
+# 2. Clone repo
 git clone https://github.com/yantrix-labs/client-scout.git
 cd client-scout
 
-# 4. Configure
+# 3. Configure
 cp .env.example .env
-# Edit .env with API keys
+# Edit .env with API keys (nano .env)
 
-# 5. Install Playwright browsers in backend image
-# (handled in Dockerfile: RUN playwright install chromium --with-deps)
+# 4. Launch
+sudo docker compose up -d
 
-# 6. Launch
-docker compose up -d
-
-# 7. Run migrations
-docker compose exec api python -m app.migrate
+# 5. Run migrations
+sudo docker compose exec api python -m app.migrate
 ```
 
 ### `.env.example`

@@ -34,7 +34,7 @@ Never:
   - `gosom/google-maps-scraper` for Google Maps discovery
   - `Playwright` for website audits
   - `Scrapy`, `BeautifulSoup`, or targeted Playwright flows where needed for other public sources
-- Infra must be designed for `Oracle Cloud Free Tier A1 Flex` with `Docker` and `docker-compose` on a single VM.
+- Infra must be designed for `AWS EC2 Free Tier t3.micro` with `Docker` and `docker-compose` on a single VM.
 - No secrets in code. Use environment variables only.
 - Keep code strongly typed with `Pydantic`, Python typing, and SQLAlchemy models.
 
@@ -72,7 +72,7 @@ When making changes, fit new work into this existing structure unless I explicit
 - Keep HTTP handlers thin and move logic into `services/`.
 - Treat discovery, audit, scoring, and export as separate pipeline stages.
 - Design for async execution and background job orchestration.
-- Be conservative with resource usage because the target machine is Oracle Free Tier ARM.
+- Be conservative with resource usage because the target machine is an AWS EC2 t3.micro (1GB RAM).
 - Add tests for business-critical logic and API contracts.
 - Preserve compatibility with Dockerized local development and single-VM deployment.
 
@@ -170,7 +170,7 @@ If priorities are ambiguous, optimize for:
 
 1. Correctness of data model and API contract
 2. Reliability of discovery and audit pipeline
-3. Resource efficiency on Oracle Free Tier
+3. Resource efficiency on AWS Free Tier
 4. Maintainability of the codebase
 5. Quality of pitch-note output
 

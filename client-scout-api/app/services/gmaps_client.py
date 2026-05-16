@@ -134,13 +134,37 @@ class GmapsScraperClient:
         """
         elapsed = 0.0
         while elapsed < max_wait:
-            status = await self.get_job_status(job_id)
-            state: str = status.get("status", "")
+            try:
+                status = await self.get_job_status(job_id)
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                # Transient HTTP / network error — log and retry on next tick
+                logger.warning(
+                    "Transient error polling job %s (%.0fs elapsed): %s",
+                    job_id, elapsed, exc,
+                )
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                continue
+
+            # Guard against non-dict / malformed responses
+            if not isinstance(status, dict):
+                logger.warning(
+                    "Unexpected non-dict status response for job %s: %r",
+                    job_id, status,
+                )
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                continue
+
+            # Normalise: accept both "Status" and "status" keys; coerce to str
+            raw_state = status.get("status") or status.get("Status") or ""
+            state: str = str(raw_state).strip().lower()
+
             logger.debug("Job %s status: %s (%.0fs elapsed)", job_id, state, elapsed)
 
             if state == "completed":
                 return await self.download_results_csv(job_id)
-            if state in ("failed", "cancelled"):
+            if state in ("failed", "cancelled", "error"):
                 raise RuntimeError(f"Gosom job {job_id} ended with status: {state}")
 
             await asyncio.sleep(poll_interval)

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.job import DiscoveryJob
-from app.services.audit_worker import run_audit_for_business
+from app.services.audit_worker import audit_failure_reason, run_audit_for_business
 from app.services.discovery import discover_businesses
 from app.services.pitch_generator import generate_and_save_pitch
 from app.services.scoring import HIGH_FIT_BUCKET, MID_FIT_BUCKET, score_business
@@ -104,7 +104,11 @@ class BusinessPipelineResult(BaseModel):
     scored: bool = False
     pitched: bool = False
     skipped_no_website: bool = False
+    failed_dns: bool = False
+    failed_audit_other: bool = False
     failed: bool = False
+    failure_stage: str | None = None
+    failure_reason: str | None = None
     fit_bucket: str | None = None
     total_score: int | None = None
     error_message: str | None = None
@@ -120,6 +124,8 @@ class PipelineSummary(BaseModel):
     scored: int = 0
     pitched: int = 0
     skipped_no_website: int = 0
+    failed_dns: int = 0
+    failed_audit_other: int = 0
     failed: int = 0
     high_fit_count: int = 0
     mid_fit_count: int = 0
@@ -229,7 +235,10 @@ async def run_scout(
         summary.message = (
             f"Pipeline complete. {summary.discovered} discovered, "
             f"{summary.audited} audited, {summary.scored} scored, "
-            f"{summary.pitched} pitched, {summary.high_fit_count} high-fit leads."
+            f"{summary.pitched} pitched, {summary.high_fit_count} high-fit leads. "
+            f"Skipped no website: {summary.skipped_no_website}, "
+            f"DNS failures: {summary.failed_dns}, "
+            f"other audit failures: {summary.failed_audit_other}."
         )
         if summary.failed > 0:
             summary.message += f" ({summary.failed} businesses had failures — see logs.)"
@@ -271,6 +280,8 @@ async def _process_businesses(
                 BusinessPipelineResult(
                     business_id=business_id,
                     failed=True,
+                    failure_stage="PIPELINE",
+                    failure_reason="unhandled_exception",
                     error_message=str(result),
                 )
             )
@@ -292,16 +303,39 @@ async def _process_one_business(
                 # ── Audit ─────────────────────────────────────────────
                 audit = None
                 if payload.auto_audit:
+                    logger.info("[%s] [PIPELINE] business processing started", business_id)
                     logger.info("[%s] [AUDIT] starting", business_id)
                     audit = await run_audit_for_business(business_id, db)
                     if audit is None:
                         result.skipped_no_website = True
-                        logger.info("[%s] [AUDIT] skipped — no website URL", business_id)
+                        result.failure_stage = "AUDIT"
+                        result.failure_reason = "no_website"
+                        result.error_message = "NO_WEBSITE: No website_url available for this business."
+                        logger.info("[%s] [AUDIT] skipped reason=no_website", business_id)
+                        return result
+                    audit_reason = audit_failure_reason(audit.error_message)
+                    if audit.status == "skipped" and audit_reason == "no_website":
+                        result.skipped_no_website = True
+                        result.failure_stage = "AUDIT"
+                        result.failure_reason = "no_website"
+                        result.error_message = audit.error_message
+                        logger.info("[%s] [AUDIT] skipped reason=no_website", business_id)
                         return result
                     if audit.status != "completed":
                         result.failed = True
+                        result.failure_stage = "AUDIT"
+                        result.failure_reason = audit_reason or "audit_other"
+                        if result.failure_reason == "dns_resolution_failed":
+                            result.failed_dns = True
+                        else:
+                            result.failed_audit_other = True
                         result.error_message = audit.error_message or f"Audit status: {audit.status}"
-                        logger.warning("[%s] [AUDIT] failed: %s", business_id, result.error_message)
+                        logger.warning(
+                            "[%s] [AUDIT] failed reason=%s message=%s",
+                            business_id,
+                            result.failure_reason,
+                            result.error_message,
+                        )
                         return result
                     result.audited = True
                     logger.info("[%s] [AUDIT] completed", business_id)
@@ -313,6 +347,8 @@ async def _process_one_business(
                     score_outcome = await score_business(business_id, db)
                     if score_outcome is None:
                         result.failed = True
+                        result.failure_stage = "SCORE"
+                        result.failure_reason = "score_no_result"
                         result.error_message = "Scoring returned no result."
                         logger.warning("[%s] [SCORE] failed: no result", business_id)
                         return result
@@ -338,11 +374,14 @@ async def _process_one_business(
                     result.pitched = True
                     logger.info("[%s] [PITCH] completed", business_id)
 
+                logger.info("[%s] [PIPELINE] business processing completed", business_id)
                 return result
 
             except Exception as exc:  # noqa: BLE001
                 logger.exception("[%s] [PIPELINE] business processing failed: %s", business_id, exc)
                 result.failed = True
+                result.failure_stage = result.failure_stage or "PIPELINE"
+                result.failure_reason = result.failure_reason or "unhandled_exception"
                 result.error_message = str(exc)
                 return result
 
@@ -355,6 +394,8 @@ def _apply_results_to_summary(
     summary.scored = sum(1 for result in results if result.scored)
     summary.pitched = sum(1 for result in results if result.pitched)
     summary.skipped_no_website = sum(1 for result in results if result.skipped_no_website)
+    summary.failed_dns = sum(1 for result in results if result.failed_dns)
+    summary.failed_audit_other = sum(1 for result in results if result.failed_audit_other)
     summary.failed = sum(1 for result in results if result.failed)
     summary.high_fit_lead_ids = [
         str(result.business_id)

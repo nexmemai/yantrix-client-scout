@@ -25,6 +25,12 @@ from playwright.async_api import (
 
 logger = logging.getLogger(__name__)
 
+DNS_ERROR_MARKERS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_DNS_TIMED_OUT",
+    "ERR_DNS_MALFORMED_RESPONSE",
+)
+
 # ---------------------------------------------------------------------------
 # Booking widget fingerprints (iframe src / script src / link href)
 # ---------------------------------------------------------------------------
@@ -297,9 +303,20 @@ async def audit_website(url: str, timeout_ms: int = 30_000) -> AuditSignals:
     except Exception as exc:  # noqa: BLE001
         logger.error("Error auditing %s: %s", url, exc, exc_info=True)
         signals.status = "failed"
-        signals.error_message = str(exc)[:2000]
+        message = str(exc)
+        if is_dns_resolution_error(message):
+            signals.error_message = f"DNS resolution failed: {message[:1900]}"
+        else:
+            signals.error_message = message[:2000]
 
     return signals
+
+
+def is_dns_resolution_error(message: str | None) -> bool:
+    """Return True when Playwright reports a DNS resolution failure."""
+    if not message:
+        return False
+    return any(marker in message for marker in DNS_ERROR_MARKERS)
 
 
 # ---------------------------------------------------------------------------

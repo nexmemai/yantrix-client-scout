@@ -180,10 +180,10 @@ async def _upsert_businesses(
 
         # Skip if duplicate on website OR phone
         if norm_url and norm_url in existing_urls:
-            logger.debug("Skipping duplicate (url): %s", raw.title)
+            logger.debug("[DISCOVERY] skipped duplicate reason=url title=%r", raw.title)
             continue
         if norm_phone and norm_phone in existing_phones:
-            logger.debug("Skipping duplicate (phone): %s", raw.title)
+            logger.debug("[DISCOVERY] skipped duplicate reason=phone title=%r", raw.title)
             continue
 
         business = _normalise_to_orm(
@@ -196,6 +196,13 @@ async def _upsert_businesses(
             db.add(business)
             await db.flush()  # get the PK without committing
             inserted_ids.append(business.id)
+            logger.info(
+                "[%s] [DISCOVERY] inserted title=%r website=%r phone=%r",
+                business.id,
+                business.name,
+                business.website_url,
+                business.phone,
+            )
 
             # Track in our in-memory sets to catch same-batch duplicates
             if norm_url:

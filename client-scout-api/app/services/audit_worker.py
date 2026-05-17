@@ -37,6 +37,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DNS_ERROR_MARKERS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_DNS_TIMED_OUT",
+    "ERR_DNS_MALFORMED_RESPONSE",
+)
+
 # ---------------------------------------------------------------------------
 # Concurrency gate (module-level so it's shared across all background tasks)
 # ---------------------------------------------------------------------------
@@ -98,7 +104,7 @@ async def run_audit_for_business(
 
     if not business.website_url:
         logger.info(
-            "[AUDIT] Business %s (%s) has no website_url — marking as skipped",
+            "[%s] [AUDIT] skipped reason=no_website business_name=%r",
             business_id, business.name,
         )
         return await _create_skipped_audit(business, db)
@@ -119,6 +125,9 @@ async def run_audit_for_business(
     async with _semaphore_instance():
         signals: AuditSignals = await audit_website(url)
 
+    if signals.status == "failed" and is_dns_resolution_error(signals.error_message):
+        signals.error_message = _dns_error_message(signals.error_message, url)
+
     # ── Step 5: Save snapshot ─────────────────────────────────────────────
     snapshot_path: str | None = None
     if signals.raw_html and signals.raw_html_hash:
@@ -135,9 +144,10 @@ async def run_audit_for_business(
     await db.refresh(audit)
 
     logger.info(
-        "[AUDIT] complete: business=%s status=%s mobile=%s forms=%s wa=%s booking=%s load=%dms",
+        "[%s] [AUDIT] complete status=%s mobile=%s forms=%s wa=%s booking=%s load=%dms reason=%s",
         business_id, audit.status, audit.mobile_friendly,
         audit.has_forms, audit.has_whatsapp, audit.has_booking, audit.load_time_ms or 0,
+        audit_failure_reason(audit.error_message),
     )
     return audit
 
@@ -214,9 +224,32 @@ async def _create_skipped_audit(business: Business, db: AsyncSession) -> Audit:
     audit = await _get_or_create_audit(business.id, db)
     audit.status = "skipped"
     audit.has_website = False
-    audit.error_message = "No website_url available for this business."
+    audit.error_message = "NO_WEBSITE: No website_url available for this business."
     await db.commit()
     return audit
+
+
+def _dns_error_message(message: str | None, url: str) -> str:
+    detail = (message or "").replace("DNS resolution failed:", "").strip()
+    return f"DNS_RESOLUTION_FAILED: Could not resolve host for {url}. {detail}"[:2000]
+
+
+def audit_failure_reason(message: str | None) -> str | None:
+    """Classify audit failure messages for pipeline summaries and logs."""
+    if not message:
+        return None
+    if message.startswith("NO_WEBSITE:"):
+        return "no_website"
+    if message.startswith("DNS_RESOLUTION_FAILED:") or is_dns_resolution_error(message):
+        return "dns_resolution_failed"
+    return "audit_other"
+
+
+def is_dns_resolution_error(message: str | None) -> bool:
+    """Return True when Playwright reports a DNS resolution failure."""
+    if not message:
+        return False
+    return any(marker in message for marker in DNS_ERROR_MARKERS)
 
 
 def _apply_signals_to_audit(

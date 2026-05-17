@@ -15,7 +15,12 @@ interface RequestInitExtra extends RequestInit {
 }
 
 function buildUrl(baseUrl: string, path: string, query?: RequestInitExtra["query"]) {
-  const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  const normalizedBaseUrl = baseUrl.trim() || window.location.origin;
+  const base =
+    normalizedBaseUrl.startsWith("http://") || normalizedBaseUrl.startsWith("https://")
+      ? normalizedBaseUrl
+      : new URL(normalizedBaseUrl, window.location.origin).toString();
+  const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== "") {

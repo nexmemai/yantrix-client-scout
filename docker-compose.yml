@@ -75,7 +75,7 @@ services:
       context: ./client-scout-dashboard
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_API_BASE_URL: ""
     image: ${DASHBOARD_IMAGE:-yantrix/client-scout-dashboard:local}
     container_name: ${DASHBOARD_CONTAINER_NAME:-clientscout-dashboard}
     restart: unless-stopped

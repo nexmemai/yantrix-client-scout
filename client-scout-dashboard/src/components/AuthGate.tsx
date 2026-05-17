@@ -4,13 +4,25 @@ import { ApiSession } from "../api/client";
 
 const STORAGE_KEY = "yantrix-client-scout-dashboard-session";
 
+function defaultApiBaseUrl() {
+  return import.meta.env.VITE_API_BASE_URL || window.location.origin;
+}
+
+function isLocalhostApiFromRemoteBrowser(baseUrl: string) {
+  return (
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1" &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(baseUrl)
+  );
+}
+
 interface AuthGateProps {
   children: (session: ApiSession, clearSession: () => void) => ReactNode;
 }
 
 export function AuthGate({ children }: AuthGateProps) {
   const [session, setSession] = useState<ApiSession | null>(null);
-  const [baseUrl, setBaseUrl] = useState(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000");
+  const [baseUrl, setBaseUrl] = useState(defaultApiBaseUrl());
   const [token, setToken] = useState("");
 
   useEffect(() => {
@@ -19,7 +31,13 @@ export function AuthGate({ children }: AuthGateProps) {
     try {
       const saved = JSON.parse(raw) as ApiSession;
       if (saved.baseUrl && saved.token) {
-        setSession(saved);
+        if (isLocalhostApiFromRemoteBrowser(saved.baseUrl)) {
+          const migrated = { ...saved, baseUrl: defaultApiBaseUrl() };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          setSession(migrated);
+        } else {
+          setSession(saved);
+        }
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -85,7 +103,7 @@ export function AuthGate({ children }: AuthGateProps) {
                 className="field"
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder="http://localhost:8000"
+                placeholder={defaultApiBaseUrl()}
               />
             </label>
             <label className="block">

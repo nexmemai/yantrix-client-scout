@@ -93,18 +93,18 @@ async def run_audit_for_business(
     business: Business | None = result.scalar_one_or_none()
 
     if business is None:
-        logger.error("Business %s not found — skipping audit", business_id)
+        logger.error("[AUDIT] Business %s not found — skipping audit", business_id)
         return None
 
     if not business.website_url:
         logger.info(
-            "Business %s (%s) has no website_url — marking audit as skipped",
+            "[AUDIT] Business %s (%s) has no website_url — marking as skipped",
             business_id, business.name,
         )
         return await _create_skipped_audit(business, db)
 
     url = _ensure_scheme(business.website_url)
-    logger.info("Starting audit for business=%s url=%r", business_id, url)
+    logger.info("[AUDIT] starting for business=%s url=%r", business_id, url)
 
     # ── Step 2: Create or reset Audit row ─────────────────────────────────
     audit = await _get_or_create_audit(business_id=business_id, db=db)
@@ -135,7 +135,7 @@ async def run_audit_for_business(
     await db.refresh(audit)
 
     logger.info(
-        "Audit complete: business=%s status=%s mobile=%s forms=%s wa=%s booking=%s load=%dms",
+        "[AUDIT] complete: business=%s status=%s mobile=%s forms=%s wa=%s booking=%s load=%dms",
         business_id, audit.status, audit.mobile_friendly,
         audit.has_forms, audit.has_whatsapp, audit.has_booking, audit.load_time_ms or 0,
     )
@@ -167,7 +167,7 @@ async def run_audits_for_job(
         )
     )
     business_ids: list[uuid.UUID] = [row[0] for row in result.all()]
-    logger.info("Found %d businesses to audit for job %s", len(business_ids), job_id)
+    logger.info("[AUDIT] found %d businesses to audit for job %s", len(business_ids), job_id)
 
     stats = {"total": len(business_ids), "completed": 0, "failed": 0, "skipped": 0}
 
@@ -181,10 +181,10 @@ async def run_audits_for_job(
             else:
                 stats["failed"] += 1
         except Exception as exc:  # noqa: BLE001
-            logger.error("Uncaught error auditing %s: %s", bid, exc)
+            logger.error("[AUDIT] uncaught error auditing %s: %s", bid, exc)
             stats["failed"] += 1
 
-    logger.info("Batch audit done for job %s: %s", job_id, stats)
+    logger.info("[AUDIT] batch audit done for job %s: %s", job_id, stats)
     return stats
 
 

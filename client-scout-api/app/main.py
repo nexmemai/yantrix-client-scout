@@ -7,8 +7,10 @@ Responsibilities:
 - Mount all API routers under /api/v1
 - Expose /health endpoint
 - Handle startup/shutdown lifecycle via lifespan context
+- Validate critical dependencies on startup (DB, Playwright, scraper)
 """
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -20,6 +22,59 @@ from app.config import get_settings
 from app.api import audit_site, configs, export, jobs, leads, reports, run_scout
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+# ── Startup dependency checks ─────────────────────────────────────────────────
+
+async def _check_db() -> bool:
+    """Verify the database is reachable. Returns True on success."""
+    from app.database import engine
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("[STARTUP] ✓ Database connectivity OK")
+        return True
+    except Exception as exc:
+        logger.critical("[STARTUP] ✗ Database connectivity FAILED: %s", exc)
+        return False
+
+
+async def _check_playwright() -> bool:
+    """Verify Playwright Chromium binary is available. Returns True on success."""
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            await browser.close()
+
+        logger.info("[STARTUP] ✓ Playwright Chromium OK")
+        return True
+    except Exception as exc:
+        logger.critical("[STARTUP] ✗ Playwright Chromium FAILED: %s", exc)
+        return False
+
+
+async def _check_scraper() -> bool:
+    """Verify the GMaps scraper sidecar is reachable. Returns True on success."""
+    import httpx
+
+    url = settings.GMAPS_SCRAPER_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{url}/api/v1/jobs")
+            resp.raise_for_status()
+        logger.info("[STARTUP] ✓ GMaps scraper reachable at %s", url)
+        return True
+    except Exception as exc:
+        logger.warning("[STARTUP] ⚠ GMaps scraper not reachable at %s: %s", url, exc)
+        return False
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
@@ -28,14 +83,32 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Startup and shutdown hooks.
-    Phase 2+: initialise DB connection pool, warm up Playwright browser pool.
+    Validates DB, Playwright, and scraper connectivity on boot.
+    Fails fast if DB or Playwright are unavailable.
     """
-    print(f"[START] {settings.APP_NAME} v{settings.APP_VERSION} starting...")
-    # TODO (Phase 2): await database engine.connect(); run pending migrations
-    # TODO (Phase 3): initialise Playwright browser pool
+    logger.info("[STARTUP] %s v%s starting...", settings.APP_NAME, settings.APP_VERSION)
+
+    # ── Critical checks (fail fast) ───────────────────────────────────────
+    db_ok = await _check_db()
+    if not db_ok:
+        raise RuntimeError(
+            "Cannot start: database is unreachable. "
+            "Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD in .env"
+        )
+
+    pw_ok = await _check_playwright()
+    if not pw_ok:
+        raise RuntimeError(
+            "Cannot start: Playwright Chromium binary is missing. "
+            "Rebuild the API image: docker compose build --no-cache api"
+        )
+
+    # ── Non-critical check (warn only) ────────────────────────────────────
+    await _check_scraper()
+
+    logger.info("[STARTUP] %s v%s ready", settings.APP_NAME, settings.APP_VERSION)
     yield
-    print("[STOP] Shutting down - cleaning up resources...")
-    # TODO: close DB pool, close Playwright browsers
+    logger.info("[SHUTDOWN] %s cleaning up...", settings.APP_NAME)
 
 
 # ── App factory ────────────────────────────────────────────────────────────────
@@ -56,7 +129,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
+    # ── CORS ──────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -65,7 +138,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Health check ──────────────────────────────────────────────────────────
+    # ── Health check ──────────────────────────────────────────────────────
     @app.get(
         "/health",
         tags=["System"],
@@ -81,7 +154,7 @@ def create_app() -> FastAPI:
             }
         )
 
-    # ── API v1 routers ────────────────────────────────────────────────────────
+    # ── API v1 routers ────────────────────────────────────────────────────
     PREFIX = "/api/v1"
 
     app.include_router(run_scout.router, prefix=PREFIX)

@@ -63,7 +63,7 @@ async def discover_businesses(
     :returns: List of newly inserted business UUIDs (duplicates excluded).
     """
     query = _build_query(niche, city)
-    logger.info("Starting discovery: query=%r niche=%r city=%r", query, niche, city)
+    logger.info("[DISCOVERY] starting: query=%r niche=%r city=%r", query, niche, city)
 
     client = GmapsScraperClient()
 
@@ -74,7 +74,7 @@ async def discover_businesses(
     # Cap results
     if len(raw_businesses) > max_results:
         logger.warning(
-            "Capping %d results to %d for niche=%r city=%r",
+            "[DISCOVERY] capping %d results to %d for niche=%r city=%r",
             len(raw_businesses), max_results, niche, city,
         )
         raw_businesses = raw_businesses[:max_results]
@@ -96,9 +96,14 @@ async def discover_businesses(
         await db.flush()
 
     logger.info(
-        "Discovery complete: %d raw → %d new businesses for %r in %r",
+        "[DISCOVERY] complete: %d raw → %d new businesses for %r in %r",
         len(raw_businesses), len(new_business_ids), niche, city,
     )
+    if not new_business_ids:
+        logger.info(
+            "[DISCOVERY] zero new businesses — all %d results were duplicates or the scraper returned nothing",
+            len(raw_businesses),
+        )
     return new_business_ids
 
 
@@ -201,7 +206,7 @@ async def _upsert_businesses(
         except IntegrityError:
             # Race condition: another worker inserted between our check and flush
             await db.rollback()
-            logger.warning("IntegrityError on insert for %r — skipping", raw.title)
+            logger.warning("[DISCOVERY] IntegrityError on insert for %r — skipping", raw.title)
 
     await db.commit()
     return inserted_ids

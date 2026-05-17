@@ -54,6 +54,7 @@ services:
       SNAPSHOT_BACKEND: ${SNAPSHOT_BACKEND:-local}
       SNAPSHOT_DIR: ${SNAPSHOT_DIR:-/app/snapshots}
       JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
+      PLAYWRIGHT_BROWSERS_PATH: /home/scout/.cache/ms-playwright
     depends_on:
       gmaps-scraper:
         condition: service_started
@@ -109,6 +110,8 @@ services:
       - gmaps_playwright_cache:/opt
     expose:
       - "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
     networks:
       - scout
 

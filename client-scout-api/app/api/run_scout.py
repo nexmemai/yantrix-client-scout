@@ -177,7 +177,7 @@ async def run_scout(
     await db.refresh(job)
 
     logger.info(
-        "[Job %s] run-scout started niche=%s city=%s depth=%d max_businesses=%d",
+        "[Job %s] [PIPELINE] started niche=%s city=%s depth=%d max_businesses=%d",
         job.id,
         payload.niche,
         payload.city,
@@ -194,6 +194,8 @@ async def run_scout(
     )
 
     try:
+        # ── Stage 1: Discovery ────────────────────────────────────────
+        logger.info("[Job %s] [DISCOVER] starting for %s in %s", job.id, payload.niche, payload.city)
         business_ids = await discover_businesses(
             niche=payload.niche,
             city=payload.city,
@@ -203,8 +205,23 @@ async def run_scout(
             max_results=payload.max_businesses,
         )
         summary.discovered = len(business_ids)
-        logger.info("[Job %s] discovery complete new_businesses=%d", job.id, len(business_ids))
+        logger.info("[Job %s] [DISCOVER] complete — %d new businesses found", job.id, len(business_ids))
 
+        # ── Zero-discovery: clean exit ────────────────────────────────
+        if not business_ids:
+            summary.status = "completed"
+            summary.message = (
+                f"Discovery returned 0 new businesses for '{payload.niche}' in "
+                f"'{payload.city}'. This can happen when the scraper finds no "
+                f"results or all discovered businesses already exist in the DB. "
+                f"Try increasing depth or using a different city."
+            )
+            logger.info("[Job %s] [DISCOVER] zero results — completing job without errors", job.id)
+            _finalize_job(job, summary, started_at)
+            await db.commit()
+            return summary
+
+        # ── Stages 2-4: Audit → Score → Pitch ─────────────────────────
         results = await _process_businesses(business_ids, payload)
         _apply_results_to_summary(summary, results)
 
@@ -214,14 +231,17 @@ async def run_scout(
             f"{summary.audited} audited, {summary.scored} scored, "
             f"{summary.pitched} pitched, {summary.high_fit_count} high-fit leads."
         )
+        if summary.failed > 0:
+            summary.message += f" ({summary.failed} businesses had failures — see logs.)"
+
         _finalize_job(job, summary, started_at)
         await db.commit()
 
-        logger.info("[Job %s] run-scout completed summary=%s", job.id, summary.model_dump())
+        logger.info("[Job %s] [PIPELINE] completed: %s", job.id, summary.message)
         return summary
 
     except Exception as exc:  # noqa: BLE001
-        logger.exception("[Job %s] run-scout failed: %s", job.id, exc)
+        logger.exception("[Job %s] [PIPELINE] fatal error: %s", job.id, exc)
         summary.status = "failed"
         summary.message = f"Pipeline error: {exc!s}"
         _finalize_job(job, summary, started_at)
@@ -269,50 +289,59 @@ async def _process_one_business(
         async with AsyncSessionLocal() as db:
             result = BusinessPipelineResult(business_id=business_id)
             try:
+                # ── Audit ─────────────────────────────────────────────
                 audit = None
                 if payload.auto_audit:
+                    logger.info("[%s] [AUDIT] starting", business_id)
                     audit = await run_audit_for_business(business_id, db)
                     if audit is None:
                         result.skipped_no_website = True
+                        logger.info("[%s] [AUDIT] skipped — no website URL", business_id)
                         return result
                     if audit.status != "completed":
                         result.failed = True
                         result.error_message = audit.error_message or f"Audit status: {audit.status}"
-                        logger.warning("[%s] audit did not complete: %s", business_id, result.error_message)
+                        logger.warning("[%s] [AUDIT] failed: %s", business_id, result.error_message)
                         return result
                     result.audited = True
+                    logger.info("[%s] [AUDIT] completed", business_id)
 
+                # ── Score ─────────────────────────────────────────────
                 score_outcome = None
                 if payload.auto_score and audit and audit.status == "completed":
+                    logger.info("[%s] [SCORE] starting", business_id)
                     score_outcome = await score_business(business_id, db)
                     if score_outcome is None:
                         result.failed = True
                         result.error_message = "Scoring returned no result."
+                        logger.warning("[%s] [SCORE] failed: no result", business_id)
                         return result
                     result.scored = True
                     result.fit_bucket = score_outcome.fit_bucket
                     result.total_score = score_outcome.total_score
                     logger.info(
-                        "[%s] score complete total=%d bucket=%s",
+                        "[%s] [SCORE] completed total=%d bucket=%s",
                         business_id,
                         score_outcome.total_score,
                         score_outcome.fit_bucket,
                     )
 
+                # ── Pitch ─────────────────────────────────────────────
                 if (
                     payload.auto_pitch
                     and score_outcome
                     and score_outcome.fit_bucket in PITCHABLE_BUCKETS
                 ):
+                    logger.info("[%s] [PITCH] generating for bucket=%s", business_id, score_outcome.fit_bucket)
                     tone = "professional" if payload.pitch_tone == "auto" else payload.pitch_tone
                     await generate_and_save_pitch(business_id=business_id, db=db, tone=tone)
                     result.pitched = True
-                    logger.info("[%s] pitch generated bucket=%s", business_id, score_outcome.fit_bucket)
+                    logger.info("[%s] [PITCH] completed", business_id)
 
                 return result
 
             except Exception as exc:  # noqa: BLE001
-                logger.exception("[%s] business pipeline failed: %s", business_id, exc)
+                logger.exception("[%s] [PIPELINE] business processing failed: %s", business_id, exc)
                 result.failed = True
                 result.error_message = str(exc)
                 return result

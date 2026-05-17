@@ -62,10 +62,7 @@ load_env() {
 build_profiles() {
   local profiles="${COMPOSE_PROFILES:-}"
 
-  if [ "${USE_LOCAL_POSTGRES:-false}" = "true" ]; then
-    profiles="${profiles:+${profiles},}local-db"
-    export DB_HOST="${DB_HOST:-db}"
-  fi
+  export DB_HOST="${DB_HOST:-db}"
 
   if [ "${ENABLE_N8N:-false}" = "true" ]; then
     profiles="${profiles:+${profiles},}n8n"
@@ -79,10 +76,6 @@ build_profiles() {
 }
 
 wait_for_local_postgres() {
-  if [[ ",${COMPOSE_PROFILES:-}," != *",local-db,"* ]]; then
-    return
-  fi
-
   log "Waiting for local Postgres health check."
   for _ in $(seq 1 30); do
     if docker compose --env-file "${ENV_FILE}" ps --format json db 2>/dev/null | grep -q '"Health":"healthy"'; then
@@ -113,8 +106,8 @@ main() {
 
   log "Stack is running."
   docker compose --env-file "${ENV_FILE}" ps
-  log "API: http://localhost:${API_PORT:-8000}"
-  log "Dashboard: http://localhost:${DASHBOARD_PORT:-3000}"
+  log "API: http://${API_HOST_PORT:-127.0.0.1:8000}"
+  log "Dashboard: http://${DASHBOARD_HOST_PORT:-127.0.0.1:3000}"
 }
 
 main "$@"

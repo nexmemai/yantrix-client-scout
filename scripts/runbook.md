@@ -1,286 +1,232 @@
-# Yantrix Client Scout — Operations Runbook
+# Yantrix Client Scout Operations Runbook
 
-> All commands assume you are in the repo root: `cd ~/yantrix-client-scout`
+All commands assume:
 
----
-
-## Quick Reference
-
-| Action | Command |
-|--------|---------|
-| Build API image | `docker compose build --no-cache api` |
-| Start all services | `docker compose up -d` |
-| Start with local DB | `COMPOSE_PROFILES=local-db docker compose up -d` |
-| Restart API + scraper | `docker compose restart api gmaps-scraper` |
-| Smoke test | `bash scripts/smoke-test.sh` |
-| View API logs | `docker compose logs api --tail=100 -f` |
-| View all logs | `docker compose logs --tail=50 -f` |
-| Stop all | `docker compose down` |
-| Full teardown (⚠ deletes data) | `docker compose down -v` |
-
----
+```bash
+cd ~/yantrix-client-scout
+```
 
 ## Build
 
-Rebuild the API image from scratch (after code/Dockerfile changes):
-
 ```bash
+git pull
 docker compose build --no-cache api
 ```
 
-This bakes Playwright Chromium into the image. No manual `playwright install` needed.
+The API image installs Playwright Chromium at build time as the runtime `scout`
+user. Do not run `playwright install` manually inside a live container.
 
-To rebuild all services (API + dashboard):
+To rebuild everything:
 
 ```bash
 docker compose build --no-cache
 ```
 
----
-
-## Start / Up
-
-### With external DB (Supabase, managed Postgres)
+## Up
 
 ```bash
 docker compose up -d
-```
-
-### With local Postgres
-
-```bash
-COMPOSE_PROFILES=local-db docker compose up -d
-```
-
-### With all optional services
-
-```bash
-COMPOSE_PROFILES=local-db,n8n,scrapy docker compose up -d
-```
-
-### Verify
-
-```bash
 docker compose ps
 ```
 
-All services should show `Up` status. The API should become `healthy` within 30 seconds.
+The default single-VM stack starts `api`, `dashboard`, `gmaps-scraper`, and
+`db`. Optional services still use profiles:
 
----
+```bash
+COMPOSE_PROFILES=n8n,scrapy docker compose up -d
+```
 
 ## Restart
 
-Restart specific services without rebuilding:
+Restart without rebuilding:
 
 ```bash
 docker compose restart api gmaps-scraper
 ```
 
-Restart and rebuild:
+Recreate the API after a rebuild:
 
 ```bash
-docker compose up -d --build api
+docker compose up -d --force-recreate api
 ```
 
----
+If the Playwright executable was missing in the running container, the API
+container must be recreated after `docker compose build --no-cache api`.
 
 ## Logs
 
-### API logs (most useful)
-
 ```bash
 docker compose logs api --tail=100 -f
-```
-
-Look for startup validation lines:
-
-```
-[STARTUP] ✓ Database connectivity OK
-[STARTUP] ✓ Playwright Chromium OK
-[STARTUP] ✓ GMaps scraper reachable at http://gmaps-scraper:8080
-[STARTUP] Yantrix Client Scout API v0.1.0 ready
-```
-
-### Pipeline run logs
-
-After a run-scout request, you'll see structured stage tags:
-
-```
-[Job <id>] [PIPELINE] started ...
-[Job <id>] [DISCOVER] starting ...
-[Job <id>] [DISCOVER] complete — N new businesses found
-[<business-id>] [AUDIT] starting ...
-[<business-id>] [SCORE] completed total=65 bucket=high-fit
-[<business-id>] [PITCH] completed
-[Job <id>] [PIPELINE] completed: ...
-```
-
-### All service logs
-
-```bash
+docker compose logs gmaps-scraper --tail=100 -f
+docker compose logs db --tail=100 -f
 docker compose logs --tail=50 -f
 ```
 
-### Scraper-specific
+Healthy API startup logs should include:
 
-```bash
-docker compose logs gmaps-scraper --tail=50 -f
+```text
+[STARTUP] db connectivity ok
+[STARTUP] playwright chromium launch ok
+[STARTUP] gmaps scraper reachable at http://gmaps-scraper:8080
+[STARTUP] Yantrix Client Scout API v0.1.0 ready
 ```
 
----
+Pipeline logs use these stage tags:
+
+```text
+[DISCOVERY]
+[AUDIT]
+[SCORE]
+[PITCH]
+```
+
+Zero discovery is a completed outcome, not a crash.
 
 ## Smoke Test
-
-Run the full smoke test suite:
 
 ```bash
 bash scripts/smoke-test.sh
 ```
 
-Customize the test payload:
+The smoke test verifies:
+
+1. `docker compose ps`
+2. Scraper docs endpoint on localhost
+3. API `/health` and `/ready`
+4. DB connectivity
+5. Playwright browser launch inside `api`
+6. One sample `run-scout` request
+
+Custom payload:
 
 ```bash
-SMOKE_NICHE=salon SMOKE_CITY=Mumbai bash scripts/smoke-test.sh
+SMOKE_NICHE=salon SMOKE_CITY=Mumbai SMOKE_MAX_BUSINESSES=3 bash scripts/smoke-test.sh
 ```
 
-The smoke test checks:
-1. Docker containers are running
-2. Scraper API docs endpoint
-3. API health endpoint
-4. Database connectivity
-5. Playwright browser launch
-6. A live run-scout request
-
----
-
-## Manual API Calls
-
-### Health check
+## Manual Verification
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+curl -fsS http://127.0.0.1:8080/api/docs | head
+docker compose exec -T api python - <<'PY'
+from playwright.sync_api import sync_playwright
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+    print("playwright ok")
+    browser.close()
+PY
 ```
 
-### Run a scout pipeline
+Run a small pipeline:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/run-scout \
+curl -fsS -X POST http://127.0.0.1:8000/api/v1/run-scout \
   -H "Content-Type: application/json" \
-  -d '{
-    "niche": "dental",
-    "city": "Jaipur",
-    "depth": 1,
-    "max_businesses": 10,
-    "auto_audit": true,
-    "auto_score": true,
-    "auto_pitch": true,
-    "pitch_tone": "professional"
-  }'
+  -d '{"niche":"dental","city":"Jaipur","depth":1,"max_businesses":3,"auto_audit":true,"auto_score":true,"auto_pitch":true}'
 ```
 
-### List leads
+## Rollback
+
+Use the previous git commit and recreate containers:
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/leads?niche=dental&city=Jaipur&page=1&limit=10"
+git log --oneline -5
+git checkout <previous-good-commit>
+docker compose build --no-cache api
+docker compose up -d --force-recreate
+bash scripts/smoke-test.sh
 ```
 
-### Export CSV
+Return to the normal branch later:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/export \
-  -H "Content-Type: application/json" \
-  -d '{"niche":"dental","city":"Jaipur","format":"csv"}'
+git checkout main
+git pull
+docker compose build --no-cache api
+docker compose up -d --force-recreate
 ```
-
----
 
 ## Teardown
 
-### Stop containers (preserve data volumes)
+Stop containers and keep data:
 
 ```bash
 docker compose down
 ```
 
-### Full teardown (⚠ destroys DB data, snapshots, scraper cache)
+Delete containers and volumes, including local Postgres data:
 
 ```bash
 docker compose down -v
 ```
 
-### Remove images too
+Delete local images too:
 
 ```bash
 docker compose down -v --rmi local
 ```
 
----
+## Configuration Rules
+
+The Dockerized API must use:
+
+```env
+GMAPS_SCRAPER_URL=http://gmaps-scraper:8080
+```
+
+Do not set it to `http://127.0.0.1:8080` for the API container. `127.0.0.1`
+inside the API container means the API container itself, not the scraper.
+
+Default host bindings are localhost-only:
+
+```env
+API_HOST_PORT=127.0.0.1:8000
+DASHBOARD_HOST_PORT=127.0.0.1:3000
+GMAPS_HOST_PORT=127.0.0.1:8080
+POSTGRES_HOST_PORT=127.0.0.1:5432
+```
+
+For public traffic on a single VM, put Nginx or a GCP load balancer in front of
+the app and keep the debug ports closed to the internet.
 
 ## Troubleshooting
 
-### API won't start / healthcheck failing
-
-```bash
-docker compose logs api --tail=30
-```
-
-Look for `[STARTUP] ✗` lines:
-
-| Error | Fix |
-|-------|-----|
-| `Database connectivity FAILED` | Check `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` in `.env`. If using local-db profile, ensure `COMPOSE_PROFILES=local-db`. |
-| `Playwright Chromium FAILED` | Rebuild the image: `docker compose build --no-cache api` |
-| `GMaps scraper not reachable` | Check if scraper is running: `docker compose logs gmaps-scraper --tail=20`. It may still be starting. |
-
-### Playwright permission denied
-
-This means the Dockerfile wasn't rebuilt. The fix is baked into the image build:
+Playwright executable missing:
 
 ```bash
 docker compose build --no-cache api
-docker compose up -d api
+docker compose up -d --force-recreate api
+docker compose logs api --tail=100
 ```
 
-### Zero discovery results
-
-This is normal behavior — the Google Maps scraper sometimes returns no results for a given query. Try:
-- A different city (larger cities have more listings)
-- Increasing `depth` (1→3)
-- A broader niche
-
-### Scraper not reachable from host
-
-The scraper is bound to `127.0.0.1:8080` (localhost only). From the VM:
+API readiness failing:
 
 ```bash
-curl http://127.0.0.1:8080/api/docs
+curl -fsS http://127.0.0.1:8000/ready
+docker compose logs api --tail=100
+docker compose logs gmaps-scraper --tail=100
+docker compose logs db --tail=100
 ```
 
-It is NOT accessible from outside the VM for security.
+Scraper not reachable:
 
----
-
-## Architecture Notes
-
-### DB Schema (Postgres)
-
-The core tables are:
-- `businesses` — discovered business leads (NOT "leads" table)
-- `audits` — website audit results (1:1 with businesses)
-- `scores` — composite lead-fit scores (1:1 with businesses)
-- `pitches` — LLM-generated outreach text (many per business)
-- `discovery_jobs` — pipeline execution tracking
-- `niche_configs` — per-niche scoring weights
-
-There is NO `leads` table. The `/api/v1/leads` endpoint queries the `businesses` table.
-
-### Service Communication
-
-```
-Host → API container:  localhost:8000
-Host → Scraper:        localhost:8080 (debug only)
-API  → Scraper:        http://gmaps-scraper:8080 (Docker internal DNS)
-API  → DB:             postgresql://scout:***@db:5432/clientscout (Docker internal)
+```bash
+docker compose ps gmaps-scraper
+curl -fsS http://127.0.0.1:8080/api/docs | head
+docker compose logs gmaps-scraper --tail=100
 ```
 
-The API MUST use `GMAPS_SCRAPER_URL=http://gmaps-scraper:8080` (Docker DNS), never `127.0.0.1:8080`.
+Database schema reminder:
+
+```text
+audits
+businesses
+discovery_jobs
+niche_configs
+pitches
+scores
+```
+
+There is no `leads` table. Lead views query `businesses` with joined audit and
+score data.

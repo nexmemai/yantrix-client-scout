@@ -1,13 +1,8 @@
 """
-main.py — FastAPI application factory.
+main.py - FastAPI application factory.
 
-Responsibilities:
-- Create the FastAPI app with metadata for OpenAPI/Swagger docs
-- Register CORS middleware
-- Mount all API routers under /api/v1
-- Expose /health endpoint
-- Handle startup/shutdown lifecycle via lifespan context
-- Validate critical dependencies on startup (DB, Playwright, scraper)
+The API validates critical runtime dependencies during startup so Docker
+readiness reflects a usable service, not just a running process.
 """
 
 import logging
@@ -18,32 +13,37 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
 from app.api import audit_site, configs, export, jobs, leads, reports, run_scout
+from app.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+STARTUP_CHECKS: dict[str, bool] = {
+    "db": False,
+    "playwright": False,
+    "scraper": False,
+}
 
-# ── Startup dependency checks ─────────────────────────────────────────────────
 
 async def _check_db() -> bool:
-    """Verify the database is reachable. Returns True on success."""
-    from app.database import engine
+    """Verify the database is reachable."""
     from sqlalchemy import text
+
+    from app.database import engine
 
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        logger.info("[STARTUP] ✓ Database connectivity OK")
+        logger.info("[STARTUP] db connectivity ok")
         return True
     except Exception as exc:
-        logger.critical("[STARTUP] ✗ Database connectivity FAILED: %s", exc)
+        logger.critical("[STARTUP] db connectivity failed: %s", exc)
         return False
 
 
 async def _check_playwright() -> bool:
-    """Verify Playwright Chromium binary is available. Returns True on success."""
+    """Verify the Playwright Chromium binary can launch."""
     try:
         from playwright.async_api import async_playwright
 
@@ -54,74 +54,72 @@ async def _check_playwright() -> bool:
             )
             await browser.close()
 
-        logger.info("[STARTUP] ✓ Playwright Chromium OK")
+        logger.info("[STARTUP] playwright chromium launch ok")
         return True
     except Exception as exc:
-        logger.critical("[STARTUP] ✗ Playwright Chromium FAILED: %s", exc)
+        logger.critical("[STARTUP] playwright chromium launch failed: %s", exc)
         return False
 
 
 async def _check_scraper() -> bool:
-    """Verify the GMaps scraper sidecar is reachable. Returns True on success."""
+    """Verify the GMaps scraper sidecar is reachable."""
     import httpx
 
     url = settings.GMAPS_SCRAPER_URL.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{url}/api/v1/jobs")
+            resp = await client.get(f"{url}/api/docs")
             resp.raise_for_status()
-        logger.info("[STARTUP] ✓ GMaps scraper reachable at %s", url)
+        logger.info("[STARTUP] gmaps scraper reachable at %s", url)
         return True
     except Exception as exc:
-        logger.warning("[STARTUP] ⚠ GMaps scraper not reachable at %s: %s", url, exc)
+        logger.critical("[STARTUP] gmaps scraper unreachable at %s: %s", url, exc)
         return False
 
 
-# ── Lifespan ───────────────────────────────────────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """
-    Startup and shutdown hooks.
-    Validates DB, Playwright, and scraper connectivity on boot.
-    Fails fast if DB or Playwright are unavailable.
-    """
-    logger.info("[STARTUP] %s v%s starting...", settings.APP_NAME, settings.APP_VERSION)
+    """Fail fast when DB, scraper, or Playwright are not ready."""
+    logger.info("[STARTUP] %s v%s starting", settings.APP_NAME, settings.APP_VERSION)
+    STARTUP_CHECKS.update({"db": False, "playwright": False, "scraper": False})
 
-    # ── Critical checks (fail fast) ───────────────────────────────────────
     db_ok = await _check_db()
+    STARTUP_CHECKS["db"] = db_ok
     if not db_ok:
         raise RuntimeError(
             "Cannot start: database is unreachable. "
-            "Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD in .env"
+            "Check DB_HOST, DB_PORT, DB_USER, and DB_PASSWORD in .env."
         )
 
     pw_ok = await _check_playwright()
+    STARTUP_CHECKS["playwright"] = pw_ok
     if not pw_ok:
         raise RuntimeError(
-            "Cannot start: Playwright Chromium binary is missing. "
-            "Rebuild the API image: docker compose build --no-cache api"
+            "Cannot start: Playwright Chromium is unavailable. "
+            "Rebuild the API image with: docker compose build --no-cache api"
         )
 
-    # ── Non-critical check (warn only) ────────────────────────────────────
-    await _check_scraper()
+    scraper_ok = await _check_scraper()
+    STARTUP_CHECKS["scraper"] = scraper_ok
+    if not scraper_ok:
+        raise RuntimeError(
+            "Cannot start: GMaps scraper is unreachable. "
+            "The Dockerized API must use GMAPS_SCRAPER_URL=http://gmaps-scraper:8080."
+        )
 
     logger.info("[STARTUP] %s v%s ready", settings.APP_NAME, settings.APP_VERSION)
     yield
-    logger.info("[SHUTDOWN] %s cleaning up...", settings.APP_NAME)
+    logger.info("[SHUTDOWN] %s cleaning up", settings.APP_NAME)
 
-
-# ── App factory ────────────────────────────────────────────────────────────────
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
         description=(
-            "Internal lead-gen engine for Yantrix Labs. "
-            "Discovers local businesses, audits their websites, "
-            "scores them with configurable weights, and generates "
-            "pitch-ready outreach notes via Groq / NVIDIA NIM."
+            "Internal lead-gen engine for Yantrix Labs. Discovers local "
+            "businesses, audits their websites, scores them with configurable "
+            "weights, and generates outreach notes via Groq or NVIDIA NIM."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -129,7 +127,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── CORS ──────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -138,12 +135,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Health check ──────────────────────────────────────────────────────
     @app.get(
         "/health",
         tags=["System"],
-        summary="Health check",
-        description="Returns 200 OK when the API is up. Used by load balancers and Docker HEALTHCHECK.",
+        summary="Liveness check",
+        description="Returns 200 OK when the API process is up.",
     )
     async def health() -> JSONResponse:
         return JSONResponse(
@@ -154,16 +150,30 @@ def create_app() -> FastAPI:
             }
         )
 
-    # ── API v1 routers ────────────────────────────────────────────────────
-    PREFIX = "/api/v1"
+    @app.get(
+        "/ready",
+        tags=["System"],
+        summary="Readiness check",
+        description="Returns 200 OK only after startup dependency checks pass.",
+    )
+    async def ready() -> JSONResponse:
+        ready_status = all(STARTUP_CHECKS.values())
+        return JSONResponse(
+            status_code=200 if ready_status else 503,
+            content={
+                "status": "ready" if ready_status else "not_ready",
+                "checks": STARTUP_CHECKS,
+            },
+        )
 
-    app.include_router(run_scout.router, prefix=PREFIX)
-    app.include_router(audit_site.router, prefix=PREFIX)
-    app.include_router(leads.router, prefix=PREFIX)
-    app.include_router(configs.router, prefix=PREFIX)
-    app.include_router(jobs.router, prefix=PREFIX)
-    app.include_router(export.router, prefix=PREFIX)
-    app.include_router(reports.router, prefix=PREFIX)
+    prefix = "/api/v1"
+    app.include_router(run_scout.router, prefix=prefix)
+    app.include_router(audit_site.router, prefix=prefix)
+    app.include_router(leads.router, prefix=prefix)
+    app.include_router(configs.router, prefix=prefix)
+    app.include_router(jobs.router, prefix=prefix)
+    app.include_router(export.router, prefix=prefix)
+    app.include_router(reports.router, prefix=prefix)
 
     return app
 

@@ -195,7 +195,7 @@ async def run_scout(
 
     try:
         # ── Stage 1: Discovery ────────────────────────────────────────
-        logger.info("[Job %s] [DISCOVER] starting for %s in %s", job.id, payload.niche, payload.city)
+        logger.info("[Job %s] [DISCOVERY] starting for %s in %s", job.id, payload.niche, payload.city)
         business_ids = await discover_businesses(
             niche=payload.niche,
             city=payload.city,
@@ -205,7 +205,7 @@ async def run_scout(
             max_results=payload.max_businesses,
         )
         summary.discovered = len(business_ids)
-        logger.info("[Job %s] [DISCOVER] complete — %d new businesses found", job.id, len(business_ids))
+        logger.info("[Job %s] [DISCOVERY] complete - %d new businesses found", job.id, len(business_ids))
 
         # ── Zero-discovery: clean exit ────────────────────────────────
         if not business_ids:
@@ -216,7 +216,7 @@ async def run_scout(
                 f"results or all discovered businesses already exist in the DB. "
                 f"Try increasing depth or using a different city."
             )
-            logger.info("[Job %s] [DISCOVER] zero results — completing job without errors", job.id)
+            logger.info("[Job %s] [DISCOVERY] zero results - completing job without errors", job.id)
             _finalize_job(job, summary, started_at)
             await db.commit()
             return summary

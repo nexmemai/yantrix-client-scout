@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     AUDIT_CONCURRENCY: int = 5   # max parallel Playwright browsers
     SCRAPER_CONCURRENCY: int = 2  # max parallel JustDial crawlers
 
+    # ── Snapshot storage ──────────────────────────────────────────────
+    SNAPSHOT_BACKEND: str = "local"
+    SNAPSHOT_DIR: str = "/app/snapshots"
+
     # ── JustDial (optional, feature-flagged) ─────────────────────────
     JUSTDIAL_ENABLED: bool = False
 

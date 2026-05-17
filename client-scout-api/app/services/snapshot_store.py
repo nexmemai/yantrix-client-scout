@@ -2,7 +2,7 @@
 services/snapshot_store.py — Store raw HTML snapshots for debugging.
 
 Storage backends (configured via env vars):
-  1. LOCAL (default): Writes to SNAPSHOT_DIR (default: ./snapshots/)
+  1. LOCAL (default): Writes to SNAPSHOT_DIR (default: /app/snapshots)
   2. S3 / MinIO: Set SNAPSHOT_BACKEND=s3 and configure S3_* env vars
 
 The stored path is returned and saved in audits.screenshot_url for
@@ -11,7 +11,6 @@ later retrieval from the audit detail view.
 
 import hashlib
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,7 +57,10 @@ async def _save_to_disk(
     """Save HTML to SNAPSHOT_DIR/<date>/<business_id>/<hash>.html"""
     import aiofiles
 
-    snapshot_dir = Path(getattr(settings, "SNAPSHOT_DIR", "./snapshots"))
+    snapshot_dir = Path(getattr(settings, "SNAPSHOT_DIR", "/app/snapshots")).expanduser()
+    if not snapshot_dir.is_absolute():
+        snapshot_dir = Path.cwd() / snapshot_dir
+
     date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     target_dir = snapshot_dir / date_str / business_id
     target_dir.mkdir(parents=True, exist_ok=True)

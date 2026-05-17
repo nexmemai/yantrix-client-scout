@@ -49,7 +49,7 @@ services:
       AUDIT_CONCURRENCY: ${AUDIT_CONCURRENCY:-3}
       SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
       SNAPSHOT_BACKEND: ${SNAPSHOT_BACKEND:-local}
-      SNAPSHOT_DIR: ${SNAPSHOT_DIR:-/app/snapshots}
+      SNAPSHOT_DIR: /app/snapshots
       JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
       PLAYWRIGHT_BROWSERS_PATH: /home/scout/.cache/ms-playwright
     depends_on:
@@ -60,7 +60,7 @@ services:
     ports:
       - "${API_HOST_PORT:-127.0.0.1:8000}:8000"
     volumes:
-      - api_snapshots:${API_SNAPSHOT_VOLUME_PATH:-/app/snapshots}
+      - api_snapshots:/app/snapshots
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
       interval: 30s

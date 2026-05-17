@@ -15,7 +15,8 @@ FROM python:3.11-slim AS production
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/home/scout \
-    PLAYWRIGHT_BROWSERS_PATH=/home/scout/.cache/ms-playwright
+    PLAYWRIGHT_BROWSERS_PATH=/home/scout/.cache/ms-playwright \
+    SNAPSHOT_DIR=/app/snapshots
 
 RUN groupadd --system scout \
     && useradd --system --gid scout --create-home --home-dir /home/scout --shell /usr/sbin/nologin scout \
@@ -25,6 +26,7 @@ RUN groupadd --system scout \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    gosu \
     libpq5 \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
@@ -36,21 +38,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /install /usr/local
 COPY --chown=scout:scout . .
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN python -m playwright install-deps chromium \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /app/snapshots \
+    && chown -R scout:scout /app/snapshots \
     && rm -rf /var/lib/apt/lists/*
-
-USER scout
 
 # Install the browser while running as the same user used at runtime. This keeps
 # the executable path and permissions stable across rebuilds and container starts.
-RUN python -m playwright install chromium \
-    && python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True, args=['--no-sandbox','--disable-dev-shm-usage']); b.close(); p.stop(); print('Playwright Chromium launch check OK')"
+RUN gosu scout sh -c "python -m playwright install chromium && python -c \"from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True, args=['--no-sandbox','--disable-dev-shm-usage']); b.close(); p.stop(); print('Playwright Chromium launch check OK')\""
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"
+
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \

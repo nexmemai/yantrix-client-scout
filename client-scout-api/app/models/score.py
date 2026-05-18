@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     CheckConstraint,
     Computed,
     DateTime,
@@ -71,6 +72,13 @@ class Score(Base):
     llm_model: Mapped[str | None] = mapped_column(String(100))
     tokens_used: Mapped[int | None] = mapped_column(Integer)
 
+    # Agency-fit layer for sales prioritisation. This is additive and does not
+    # replace the existing overall_score or score_band fields.
+    agency_fit_score: Mapped[int | None] = mapped_column(Integer)
+    agency_fit_bucket: Mapped[str | None] = mapped_column(String(20))
+    opportunity_types: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    estimated_deal_value: Mapped[int | None] = mapped_column(Integer)
+
     scored_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -81,9 +89,23 @@ class Score(Base):
         CheckConstraint("online_presence BETWEEN 0 AND 100", name="chk_score_op"),
         CheckConstraint("conversion_readiness BETWEEN 0 AND 100", name="chk_score_cr"),
         CheckConstraint("urgency BETWEEN 0 AND 100", name="chk_score_urgency"),
+        CheckConstraint(
+            "agency_fit_score IS NULL OR agency_fit_score BETWEEN 0 AND 100",
+            name="chk_score_agency_fit_score",
+        ),
+        CheckConstraint(
+            "agency_fit_bucket IS NULL OR agency_fit_bucket IN ('hot', 'warm', 'cold', 'skip')",
+            name="chk_score_agency_fit_bucket",
+        ),
+        CheckConstraint(
+            "estimated_deal_value IS NULL OR estimated_deal_value >= 0",
+            name="chk_score_estimated_deal_value",
+        ),
         Index("idx_scores_band_overall", "score_band", "overall_score"),
         Index("idx_scores_business_id", "business_id"),
         Index("idx_scores_overall", "overall_score"),
+        Index("idx_scores_agency_fit_bucket", "agency_fit_bucket"),
+        Index("idx_scores_agency_fit_score", "agency_fit_score"),
     )
 
     # Relationships

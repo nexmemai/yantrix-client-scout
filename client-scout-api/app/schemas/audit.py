@@ -45,6 +45,8 @@ class AuditRead(BaseModel):
 
     # Tech
     tech_stack: list[str] | None = None
+    cms_detected: str | None = None
+    pain_flags: dict[str, bool] | None = None
     screenshot_url: str | None = None
 
     # Meta

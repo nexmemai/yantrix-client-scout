@@ -75,7 +75,14 @@ async def list_leads(
     total = await db.scalar(count_stmt) or 0
 
     stmt = (
-        select(Business, Audit.has_website, Score.overall_score)
+        select(
+            Business,
+            Audit.has_website,
+            Score.overall_score,
+            Score.agency_fit_score,
+            Score.agency_fit_bucket,
+            Score.estimated_deal_value,
+        )
         .outerjoin(Audit, Audit.business_id == Business.id)
         .outerjoin(Score, Score.business_id == Business.id)
         .where(*filters)
@@ -94,10 +101,25 @@ async def list_leads(
             website_url=business.website_url,
             source=business.source,
             overall_score=overall_score,
+            agency_fit_score=agency_fit_score,
+            agency_fit_bucket=agency_fit_bucket,
+            estimated_deal_value=estimated_deal_value,
             has_website=has_website,
+            rating=float(business.rating) if business.rating is not None else None,
+            review_count=business.review_count,
+            lead_status=business.lead_status,
+            follow_up_at=business.follow_up_at,
+            priority_rank=business.priority_rank,
             created_at=business.created_at,
         )
-        for business, has_website, overall_score in rows
+        for (
+            business,
+            has_website,
+            overall_score,
+            agency_fit_score,
+            agency_fit_bucket,
+            estimated_deal_value,
+        ) in rows
     ]
 
     return {
@@ -227,7 +249,25 @@ async def get_lead(
         google_maps_url=business.google_maps_url,
         rating=float(business.rating) if business.rating is not None else None,
         review_count=business.review_count,
+        contact_name=business.contact_name,
+        contact_title=business.contact_title,
+        contact_email=business.contact_email,
+        contact_phone=business.contact_phone,
+        contact_linkedin_url=business.contact_linkedin_url,
+        contact_confidence=business.contact_confidence,
+        primary_language=business.primary_language,
+        domain_age_years=float(business.domain_age_years) if business.domain_age_years is not None else None,
+        has_recent_updates=business.has_recent_updates,
+        budget_tier=business.budget_tier,
+        reliability=business.reliability,
         source=business.source,
+        lead_status=business.lead_status,
+        follow_up_at=business.follow_up_at,
+        last_contacted_at=business.last_contacted_at,
+        contact_attempts=business.contact_attempts,
+        sales_notes=business.sales_notes,
+        priority_rank=business.priority_rank,
+        assigned_to=business.assigned_to,
         discovery_job_id=business.discovery_job_id,
         created_at=business.created_at,
         updated_at=business.updated_at,
@@ -264,6 +304,10 @@ def _score_read(score: Score, pitch: Pitch | None) -> ScoreRead:
         online_presence=score.online_presence,
         conversion_readiness=score.conversion_readiness,
         urgency=score.urgency,
+        agency_fit_score=score.agency_fit_score,
+        agency_fit_bucket=score.agency_fit_bucket,
+        opportunity_types=score.opportunity_types,
+        estimated_deal_value=score.estimated_deal_value,
         pitch_notes=pitch.pitch_notes if pitch else None,
         recommended_services=pitch.recommended_services if pitch else None,
         objection_handlers=pitch.objection_handlers if pitch else None,

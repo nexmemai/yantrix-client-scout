@@ -8,7 +8,15 @@ export interface LeadListItem {
   website_url?: string | null;
   source: string;
   overall_score?: number | null;
+  agency_fit_score?: number | null;
+  agency_fit_bucket?: string | null;
+  estimated_deal_value?: number | null;
   has_website?: boolean | null;
+  rating?: number | null;
+  review_count?: number | null;
+  lead_status: string;
+  follow_up_at?: string | null;
+  priority_rank?: number | null;
   created_at: string;
 }
 
@@ -35,6 +43,8 @@ export interface AuditRead {
   has_linkedin: boolean;
   has_twitter: boolean;
   tech_stack?: string[] | null;
+  cms_detected?: string | null;
+  pain_flags?: Record<string, boolean> | null;
   screenshot_url?: string | null;
   status: string;
   error_message?: string | null;
@@ -49,6 +59,10 @@ export interface ScoreRead {
   online_presence?: number | null;
   conversion_readiness?: number | null;
   urgency?: number | null;
+  agency_fit_score?: number | null;
+  agency_fit_bucket?: string | null;
+  opportunity_types?: string[] | null;
+  estimated_deal_value?: number | null;
   pitch_notes?: string | null;
   recommended_services?: string[] | null;
   objection_handlers?: string | null;
@@ -69,6 +83,24 @@ export interface LeadDetail {
   email?: string | null;
   rating?: number | null;
   review_count?: number | null;
+  contact_name?: string | null;
+  contact_title?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  contact_linkedin_url?: string | null;
+  contact_confidence?: number | null;
+  primary_language?: string | null;
+  domain_age_years?: number | null;
+  has_recent_updates?: boolean | null;
+  budget_tier?: string | null;
+  reliability?: string | null;
+  lead_status: string;
+  follow_up_at?: string | null;
+  last_contacted_at?: string | null;
+  contact_attempts: number;
+  sales_notes?: string | null;
+  priority_rank?: number | null;
+  assigned_to?: string | null;
   created_at: string;
   updated_at: string;
   audit?: AuditRead | null;

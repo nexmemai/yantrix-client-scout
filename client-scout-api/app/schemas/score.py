@@ -18,6 +18,10 @@ class ScoreRead(BaseModel):
     online_presence: int | None = None
     conversion_readiness: int | None = None
     urgency: int | None = None
+    agency_fit_score: int | None = None
+    agency_fit_bucket: str | None = None
+    opportunity_types: list[str] | None = None
+    estimated_deal_value: int | None = None
     pitch_notes: str | None = None
     recommended_services: list[str] | None = None
     objection_handlers: str | None = None

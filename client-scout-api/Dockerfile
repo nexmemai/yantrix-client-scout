@@ -42,6 +42,7 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN python -m playwright install-deps chromium \
     && chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /app/scripts/ingest_gmaps_csv.py \
     && mkdir -p /app/snapshots \
     && chown -R scout:scout /app/snapshots \
     && rm -rf /var/lib/apt/lists/*

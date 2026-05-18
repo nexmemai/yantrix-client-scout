@@ -17,6 +17,7 @@ and runs as a FastAPI background task to avoid blocking the HTTP response.
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select, or_
@@ -28,6 +29,15 @@ from app.models.job import DiscoveryJob
 from app.services.gmaps_client import GmapsRawBusiness, GmapsScraperClient
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RawBusinessIngestResult:
+    """Summary returned when raw scraper rows are normalised into businesses."""
+
+    raw_count: int
+    inserted_ids: list[uuid.UUID]
+    duplicates_skipped: int
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +94,7 @@ async def discover_businesses(
         await db.flush()
 
     # --- Step 3 & 4: Normalise + deduplicate ---
-    new_business_ids = await _upsert_businesses(
+    ingest_result = await ingest_raw_businesses(
         raw_businesses=raw_businesses,
         niche=niche,
         db=db,
@@ -97,14 +107,29 @@ async def discover_businesses(
 
     logger.info(
         "[DISCOVERY] complete: %d raw → %d new businesses for %r in %r",
-        len(raw_businesses), len(new_business_ids), niche, city,
+        len(raw_businesses), len(ingest_result.inserted_ids), niche, city,
     )
-    if not new_business_ids:
+    if not ingest_result.inserted_ids:
         logger.info(
             "[DISCOVERY] zero new businesses — all %d results were duplicates or the scraper returned nothing",
             len(raw_businesses),
         )
-    return new_business_ids
+    return ingest_result.inserted_ids
+
+
+async def ingest_raw_businesses(
+    raw_businesses: list[GmapsRawBusiness],
+    niche: str,
+    db: AsyncSession,
+    discovery_job_id: uuid.UUID | None,
+) -> RawBusinessIngestResult:
+    """Normalise, deduplicate, and insert raw scraper rows for any source."""
+    return await _upsert_businesses(
+        raw_businesses=raw_businesses,
+        niche=niche,
+        db=db,
+        discovery_job_id=discovery_job_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +166,7 @@ async def _upsert_businesses(
     niche: str,
     db: AsyncSession,
     discovery_job_id: uuid.UUID | None,
-) -> list[uuid.UUID]:
+) -> RawBusinessIngestResult:
     """
     Normalise, deduplicate, and insert businesses.
 
@@ -153,7 +178,7 @@ async def _upsert_businesses(
     where one scrape returns a local number and another returns a mobile.
     """
     if not raw_businesses:
-        return []
+        return RawBusinessIngestResult(raw_count=0, inserted_ids=[], duplicates_skipped=0)
 
     # Collect candidate fingerprints for batch dedup check
     candidate_phones = {r.phone for r in raw_businesses if r.phone}
@@ -173,6 +198,7 @@ async def _upsert_businesses(
     existing_urls: set[str] = {row.website_url for row in existing_rows if row.website_url}
 
     inserted_ids: list[uuid.UUID] = []
+    duplicates_skipped = 0
 
     for raw in raw_businesses:
         norm_url = _normalise_url(raw.website)
@@ -180,9 +206,11 @@ async def _upsert_businesses(
 
         # Skip if duplicate on website OR phone
         if norm_url and norm_url in existing_urls:
+            duplicates_skipped += 1
             logger.debug("[DISCOVERY] skipped duplicate reason=url title=%r", raw.title)
             continue
         if norm_phone and norm_phone in existing_phones:
+            duplicates_skipped += 1
             logger.debug("[DISCOVERY] skipped duplicate reason=phone title=%r", raw.title)
             continue
 
@@ -193,30 +221,37 @@ async def _upsert_businesses(
         )
 
         try:
-            db.add(business)
-            await db.flush()  # get the PK without committing
-            inserted_ids.append(business.id)
-            logger.info(
-                "[%s] [DISCOVERY] inserted title=%r website=%r phone=%r",
-                business.id,
-                business.name,
-                business.website_url,
-                business.phone,
-            )
-
-            # Track in our in-memory sets to catch same-batch duplicates
-            if norm_url:
-                existing_urls.add(norm_url)
-            if norm_phone:
-                existing_phones.add(norm_phone)
+            async with db.begin_nested():
+                db.add(business)
+                await db.flush()  # get the PK without committing
 
         except IntegrityError:
             # Race condition: another worker inserted between our check and flush
-            await db.rollback()
+            duplicates_skipped += 1
             logger.warning("[DISCOVERY] IntegrityError on insert for %r — skipping", raw.title)
+            continue
+
+        inserted_ids.append(business.id)
+        logger.info(
+            "[%s] [DISCOVERY] inserted title=%r website=%r phone=%r",
+            business.id,
+            business.name,
+            business.website_url,
+            business.phone,
+        )
+
+        # Track in our in-memory sets to catch same-batch duplicates
+        if norm_url:
+            existing_urls.add(norm_url)
+        if norm_phone:
+            existing_phones.add(norm_phone)
 
     await db.commit()
-    return inserted_ids
+    return RawBusinessIngestResult(
+        raw_count=len(raw_businesses),
+        inserted_ids=inserted_ids,
+        duplicates_skipped=duplicates_skipped,
+    )
 
 
 def _normalise_to_orm(

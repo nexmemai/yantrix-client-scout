@@ -117,7 +117,7 @@ class GmapsScraperClient:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(f"{self._base_url}/api/v1/jobs/{job_id}/download")
             resp.raise_for_status()
-            return self._parse_csv(resp.text)
+            return parse_gmaps_csv(resp.text)
 
     async def wait_for_results(
         self,
@@ -176,47 +176,53 @@ class GmapsScraperClient:
 
     @staticmethod
     def _parse_csv(raw_csv: str) -> list[GmapsRawBusiness]:
-        """Parse a gosom CSV blob into a list of GmapsRawBusiness DTOs."""
-        results: list[GmapsRawBusiness] = []
-        reader = csv.DictReader(io.StringIO(raw_csv))
-
-        for row in reader:
-            try:
-                rating_str = row.get("rating", "").strip()
-                rating = float(rating_str) if rating_str else None
-
-                reviews_str = row.get("reviews_count", "").strip()
-                review_count = int(reviews_str) if reviews_str else None
-
-                # Attempt to extract city from the address field
-                address = row.get("address", "").strip() or None
-                city = _extract_city(address)
-
-                results.append(
-                    GmapsRawBusiness(
-                        input_id=row.get("input_id", ""),
-                        title=row.get("title", "").strip(),
-                        category=row.get("category", "").strip() or None,
-                        address=address,
-                        city=city,
-                        phone=row.get("phone", "").strip() or None,
-                        website=row.get("website", "").strip() or None,
-                        google_maps_url=row.get("link", "").strip() or None,
-                        rating=rating,
-                        review_count=review_count,
-                        raw=dict(row),
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001 – log and continue on bad row
-                logger.warning("Failed to parse gosom row: %s — %s", row, exc)
-
-        logger.info("Parsed %d businesses from gosom CSV", len(results))
-        return results
+        return parse_gmaps_csv(raw_csv)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def parse_gmaps_csv(raw_csv: str) -> list[GmapsRawBusiness]:
+    """Parse a gosom/google-maps-scraper CSV blob into raw business DTOs."""
+    results: list[GmapsRawBusiness] = []
+    reader = csv.DictReader(io.StringIO(raw_csv))
+
+    if not reader.fieldnames:
+        raise ValueError("CSV has no header row.")
+
+    for row in reader:
+        try:
+            rating_str = row.get("rating", "").strip()
+            rating = float(rating_str) if rating_str else None
+
+            reviews_str = row.get("reviews_count", "").strip()
+            review_count = int(reviews_str) if reviews_str else None
+
+            address = row.get("address", "").strip() or None
+            city = _extract_city(address)
+
+            results.append(
+                GmapsRawBusiness(
+                    input_id=row.get("input_id", ""),
+                    title=row.get("title", "").strip(),
+                    category=row.get("category", "").strip() or None,
+                    address=address,
+                    city=city,
+                    phone=row.get("phone", "").strip() or None,
+                    website=row.get("website", "").strip() or None,
+                    google_maps_url=row.get("link", "").strip() or None,
+                    rating=rating,
+                    review_count=review_count,
+                    raw=dict(row),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - log and continue on bad row
+            logger.warning("Failed to parse gosom row: %s - %s", row, exc)
+
+    logger.info("Parsed %d businesses from gosom CSV", len(results))
+    return results
 
 
 def _extract_city(address: str | None) -> str | None:

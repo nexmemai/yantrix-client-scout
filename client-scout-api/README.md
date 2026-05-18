@@ -36,3 +36,13 @@ docker exec -it clientscout-api python scripts/ingest_gmaps_csv.py \
 For a smaller test batch, add `--max-businesses 10`. The script prints a concise
 summary with rows parsed, new businesses inserted, duplicates skipped, and the
 created `job_id`.
+
+## Scout job status API
+
+`POST /api/v1/run-scout` creates a `discovery_jobs` row and returns immediately
+with `job_id` and initial `status=running`. The pipeline continues in the
+background using the existing discovery, audit, score, and pitch services.
+
+Poll `GET /api/v1/jobs/{job_id}` to show job progress. The response includes
+`total_discovered`, `total_audited`, `total_scored`, derived `total_pitched`,
+and `last_updated_at`.

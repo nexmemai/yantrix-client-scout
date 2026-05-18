@@ -29,8 +29,10 @@ class JobRead(BaseModel):
     total_discovered: int
     total_audited: int
     total_scored: int
+    total_pitched: int = 0
     error_message: str | None = None
     started_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    last_updated_at: datetime
     completed_at: datetime | None = None

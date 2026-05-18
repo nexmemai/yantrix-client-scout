@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,6 +119,7 @@ class PipelineSummary(BaseModel):
     status: str
     niche: str
     city: str
+    source: str = "google_maps"
     discovered: int = 0
     audited: int = 0
     scored: int = 0
@@ -131,6 +132,7 @@ class PipelineSummary(BaseModel):
     mid_fit_count: int = 0
     high_fit_lead_ids: list[str] = Field(default_factory=list)
     message: str = ""
+    created_at: str
     started_at: str
     completed_at: str | None = None
     duration_seconds: float | None = None
@@ -144,6 +146,7 @@ class PipelineSummary(BaseModel):
 )
 async def run_scout(
     payload: RunScoutRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> PipelineSummary:
     started_at = datetime.now(tz=timezone.utc)
@@ -196,6 +199,41 @@ async def run_scout(
         status="running",
         niche=payload.niche,
         city=payload.city,
+        source=job.source,
+        message=(
+            f"Scout job started for '{payload.niche}' in '{payload.city}'. "
+            "Poll /api/v1/jobs/{job_id} for progress."
+        ),
+        created_at=job.created_at.isoformat(),
+        started_at=started_at.isoformat(),
+    )
+
+    background_tasks.add_task(_run_scout_job, job.id, payload, started_at)
+    return summary
+
+
+async def _run_scout_job(
+    job_id: uuid.UUID,
+    payload: RunScoutRequest,
+    started_at: datetime,
+) -> None:
+    """Run the scout pipeline after the HTTP response returns."""
+    from app.database import AsyncSessionLocal
+
+    db = AsyncSessionLocal()
+    job = await db.get(DiscoveryJob, job_id)
+    if job is None:
+        await db.close()
+        logger.error("[Job %s] [PIPELINE] job row disappeared before processing", job_id)
+        return
+
+    summary = PipelineSummary(
+        job_id=str(job.id),
+        status="running",
+        niche=payload.niche,
+        city=payload.city,
+        source=job.source,
+        created_at=job.created_at.isoformat(),
         started_at=started_at.isoformat(),
     )
 
@@ -225,7 +263,8 @@ async def run_scout(
             logger.info("[Job %s] [DISCOVERY] zero results - completing job without errors", job.id)
             _finalize_job(job, summary, started_at)
             await db.commit()
-            return summary
+            await db.close()
+            return
 
         # ── Stages 2-4: Audit → Score → Pitch ─────────────────────────
         results = await _process_businesses(business_ids, payload)
@@ -247,7 +286,8 @@ async def run_scout(
         await db.commit()
 
         logger.info("[Job %s] [PIPELINE] completed: %s", job.id, summary.message)
-        return summary
+        await db.close()
+        return
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("[Job %s] [PIPELINE] fatal error: %s", job.id, exc)
@@ -256,7 +296,8 @@ async def run_scout(
         _finalize_job(job, summary, started_at)
         job.error_message = summary.message[:2000]
         await db.commit()
-        return summary
+        await db.close()
+        return
 
 
 async def _process_businesses(

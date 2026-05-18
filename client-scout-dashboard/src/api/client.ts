@@ -1,8 +1,12 @@
 import {
   LeadDetail,
+  JobStatus,
   NicheConfig,
+  PaginatedJobs,
   PaginatedLeads,
   PitchResponse,
+  RunScoutPayload,
+  RunScoutResponse,
 } from "../lib/types";
 
 export interface ApiSession {
@@ -81,6 +85,23 @@ async function request<T>(
 export const apiClient = {
   listLeads(session: ApiSession, query?: RequestInitExtra["query"]) {
     return request<PaginatedLeads>(session, "/api/v1/leads", { method: "GET", query });
+  },
+  runScout(session: ApiSession, payload: RunScoutPayload) {
+    return request<RunScoutResponse>(session, "/api/v1/run-scout", {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        auto_audit: true,
+        auto_score: true,
+        auto_pitch: true,
+      }),
+    });
+  },
+  getJob(session: ApiSession, jobId: string) {
+    return request<JobStatus>(session, `/api/v1/jobs/${jobId}`, { method: "GET" });
+  },
+  listJobs(session: ApiSession, query?: RequestInitExtra["query"]) {
+    return request<PaginatedJobs>(session, "/api/v1/jobs", { method: "GET", query });
   },
   getLead(session: ApiSession, leadId: string) {
     return request<LeadDetail>(session, `/api/v1/leads/${leadId}`, { method: "GET" });

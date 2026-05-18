@@ -10,7 +10,9 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.business import Business
 from app.models.job import DiscoveryJob
+from app.models.pitch import Pitch
 from app.schemas.job import JobRead
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -41,7 +43,7 @@ async def list_jobs(
         .offset((page - 1) * limit)
         .limit(limit)
     )
-    items = [JobRead.model_validate(job) for job in result.scalars().all()]
+    items = [await _job_to_read(db, job) for job in result.scalars().all()]
     return {
         "total": total,
         "page": page,
@@ -57,4 +59,30 @@ async def get_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> JobR
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
-    return JobRead.model_validate(job)
+    return await _job_to_read(db, job)
+
+
+async def _job_to_read(db: AsyncSession, job: DiscoveryJob) -> JobRead:
+    total_pitched = await db.scalar(
+        select(func.count(Pitch.id))
+        .join(Business, Business.id == Pitch.business_id)
+        .where(Business.discovery_job_id == job.id)
+    )
+    return JobRead(
+        id=job.id,
+        query=job.query,
+        city=job.city,
+        source=job.source,
+        niche=job.niche,
+        status=job.status,
+        total_discovered=job.total_discovered,
+        total_audited=job.total_audited,
+        total_scored=job.total_scored,
+        total_pitched=total_pitched or 0,
+        error_message=job.error_message,
+        started_at=job.started_at,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        last_updated_at=job.updated_at,
+        completed_at=job.completed_at,
+    )

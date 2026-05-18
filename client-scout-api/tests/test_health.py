@@ -22,8 +22,6 @@ def test_health_check():
 
 
 def test_run_scout_returns_summary(monkeypatch):
-    business_id = "11111111-1111-1111-1111-111111111111"
-
     class FakeSession:
         async def scalar(self, _stmt):
             return 0
@@ -40,24 +38,11 @@ def test_run_scout_returns_summary(monkeypatch):
     async def fake_get_db():
         yield FakeSession()
 
-    async def fake_discover_businesses(*_args, **_kwargs):
-        return [business_id]
-
-    async def fake_process_businesses(*_args, **_kwargs):
-        return [
-            run_scout_api.BusinessPipelineResult(
-                business_id=business_id,
-                audited=True,
-                scored=True,
-                pitched=True,
-                fit_bucket="high-fit",
-                total_score=72,
-            )
-        ]
+    async def fake_run_scout_job(*_args, **_kwargs):
+        return None
 
     app.dependency_overrides[get_db] = fake_get_db
-    monkeypatch.setattr(run_scout_api, "discover_businesses", fake_discover_businesses)
-    monkeypatch.setattr(run_scout_api, "_process_businesses", fake_process_businesses)
+    monkeypatch.setattr(run_scout_api, "_run_scout_job", fake_run_scout_job)
 
     response = client.post(
         "/api/v1/run-scout",
@@ -68,13 +53,13 @@ def test_run_scout_returns_summary(monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "completed"
+    assert data["status"] == "running"
     assert "job_id" in data
-    assert data["discovered"] == 1
-    assert data["audited"] == 1
-    assert data["scored"] == 1
-    assert data["pitched"] == 1
-    assert data["high_fit_lead_ids"] == [business_id]
+    assert data["discovered"] == 0
+    assert data["audited"] == 0
+    assert data["scored"] == 0
+    assert data["pitched"] == 0
+    assert "started" in data["message"].lower()
 
 
 def test_run_scout_rejects_oversized_request():

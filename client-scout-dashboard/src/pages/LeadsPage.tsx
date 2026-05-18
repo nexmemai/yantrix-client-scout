@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { ChevronRight, Filter } from "lucide-react";
+import { ChevronRight, Filter, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 import { apiClient, ApiSession } from "../api/client";
 import { LeadListItem } from "../lib/types";
@@ -12,16 +12,52 @@ interface LeadsPageProps {
 }
 
 export function LeadsPage({ session }: LeadsPageProps) {
+  const queryClient = useQueryClient();
   const [city, setCity] = useState("");
   const [niche, setNiche] = useState("");
   const [bucket, setBucket] = useState<"" | "high-fit" | "mid-fit" | "low-fit">("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [runNiche, setRunNiche] = useState("dental");
+  const [runCity, setRunCity] = useState("");
+  const [maxBusinesses, setMaxBusinesses] = useState(25);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const leadsQuery = useQuery({
     queryKey: ["leads"],
     queryFn: () => apiClient.listLeads(session, { page: 1, limit: 100 }),
   });
+
+  const runScoutMutation = useMutation({
+    mutationFn: () =>
+      apiClient.runScout(session, {
+        niche: runNiche.trim(),
+        city: runCity.trim(),
+        max_businesses: maxBusinesses,
+      }),
+    onSuccess: (response) => {
+      setActiveJobId(response.job_id);
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+
+  const jobStatusQuery = useQuery({
+    queryKey: ["jobs", activeJobId],
+    queryFn: () => apiClient.getJob(session, activeJobId as string),
+    enabled: Boolean(activeJobId),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.status === "completed" || data?.status === "failed" ? false : 4000;
+    },
+  });
+
+  useEffect(() => {
+    const status = jobStatusQuery.data?.status;
+    if (status === "completed") {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  }, [jobStatusQuery.data?.status, queryClient]);
 
   const items = leadsQuery.data?.items ?? [];
   const niches = useMemo(
@@ -91,6 +127,20 @@ export function LeadsPage({ session }: LeadsPageProps) {
     getCoreRowModel: getCoreRowModel(),
   });
 
+  const job = jobStatusQuery.data;
+  const jobRunning = runScoutMutation.isPending || job?.status === "running" || job?.status === "pending";
+  const jobProgressText = job
+    ? `${job.total_scored || job.total_audited || job.total_discovered} / ${Math.max(job.total_discovered, maxBusinesses)} leads processed`
+    : "No active scout job";
+
+  const submitRunScout = (event: FormEvent) => {
+    event.preventDefault();
+    if (!runNiche.trim() || !runCity.trim() || jobRunning) {
+      return;
+    }
+    runScoutMutation.mutate();
+  };
+
   return (
     <div className="grid gap-4">
       <section className="surface section-band">
@@ -106,6 +156,53 @@ export function LeadsPage({ session }: LeadsPageProps) {
             {filtered.length} visible
           </div>
         </div>
+        <form className="mt-5 grid gap-3 border-y border-[var(--line)] py-4 lg:grid-cols-[1fr_1fr_160px_auto]" onSubmit={submitRunScout}>
+          <input
+            className="field"
+            placeholder="Niche"
+            value={runNiche}
+            onChange={(event) => setRunNiche(event.target.value)}
+          />
+          <input
+            className="field"
+            placeholder="City"
+            value={runCity}
+            onChange={(event) => setRunCity(event.target.value)}
+          />
+          <input
+            className="field"
+            max={100}
+            min={1}
+            type="number"
+            value={maxBusinesses}
+            onChange={(event) => setMaxBusinesses(Number(event.target.value))}
+          />
+          <button
+            className="button button-primary h-11 px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={jobRunning || !runNiche.trim() || !runCity.trim()}
+            type="submit"
+          >
+            <Play className="h-4 w-4" />
+            {jobRunning ? "Running..." : "Run Scout"}
+          </button>
+          <div className="lg:col-span-4">
+            {job ? (
+              <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-[var(--line)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--muted)]">
+                <span className={job.status === "failed" ? "text-[var(--danger)]" : "text-[var(--accent)]"}>
+                  Job {job.status}
+                </span>
+                <span>{job.niche ?? runNiche} in {job.city ?? runCity}</span>
+                <span>{jobProgressText}</span>
+              </div>
+            ) : null}
+            {runScoutMutation.isError ? (
+              <div className="mt-2 text-sm text-[var(--danger)]">{(runScoutMutation.error as Error).message}</div>
+            ) : null}
+            {jobStatusQuery.isError ? (
+              <div className="mt-2 text-sm text-[var(--danger)]">{(jobStatusQuery.error as Error).message}</div>
+            ) : null}
+          </div>
+        </form>
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <input className="field" placeholder="City" value={city} onChange={(event) => setCity(event.target.value)} />
           <select className="field" value={niche} onChange={(event) => setNiche(event.target.value)}>

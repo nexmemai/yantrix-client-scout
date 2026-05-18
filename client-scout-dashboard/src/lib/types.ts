@@ -83,6 +83,56 @@ export interface PaginatedLeads {
   items: LeadListItem[];
 }
 
+export interface RunScoutPayload {
+  niche: string;
+  city: string;
+  max_businesses: number;
+}
+
+export interface RunScoutResponse {
+  job_id: string;
+  status: string;
+  niche: string;
+  city: string;
+  source: string;
+  discovered: number;
+  audited: number;
+  scored: number;
+  pitched: number;
+  message: string;
+  created_at: string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds?: number | null;
+}
+
+export interface JobStatus {
+  id: string;
+  query: string;
+  city?: string | null;
+  source: string;
+  niche?: string | null;
+  status: string;
+  total_discovered: number;
+  total_audited: number;
+  total_scored: number;
+  total_pitched: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  last_updated_at: string;
+  completed_at?: string | null;
+}
+
+export interface PaginatedJobs {
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+  items: JobStatus[];
+}
+
 export interface ConfigWeights {
   weak_website: number;
   lead_capture_gap: number;

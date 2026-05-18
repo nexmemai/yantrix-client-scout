@@ -4,16 +4,8 @@ import { ApiSession } from "../api/client";
 
 const STORAGE_KEY = "yantrix-client-scout-dashboard-session";
 
-function defaultApiBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL || window.location.origin;
-}
-
-function isLocalhostApiFromRemoteBrowser(baseUrl: string) {
-  return (
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1" &&
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(baseUrl)
-  );
+function devApiBaseUrl() {
+  return import.meta.env.VITE_API_BASE_URL || "";
 }
 
 interface AuthGateProps {
@@ -22,22 +14,22 @@ interface AuthGateProps {
 
 export function AuthGate({ children }: AuthGateProps) {
   const [session, setSession] = useState<ApiSession | null>(null);
-  const [baseUrl, setBaseUrl] = useState(defaultApiBaseUrl());
+  const [apiBaseUrl, setApiBaseUrl] = useState(devApiBaseUrl());
   const [token, setToken] = useState("");
+  const showDevApiUrl = Boolean(import.meta.env.DEV);
 
   useEffect(() => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try {
-      const saved = JSON.parse(raw) as ApiSession;
-      if (saved.baseUrl && saved.token) {
-        if (isLocalhostApiFromRemoteBrowser(saved.baseUrl)) {
-          const migrated = { ...saved, baseUrl: defaultApiBaseUrl() };
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-          setSession(migrated);
-        } else {
-          setSession(saved);
-        }
+      const saved = JSON.parse(raw) as ApiSession & { baseUrl?: string };
+      if (saved.token) {
+        const nextSession: ApiSession = {
+          token: saved.token,
+          apiBaseUrl: import.meta.env.DEV ? saved.apiBaseUrl || saved.baseUrl || devApiBaseUrl() : undefined,
+        };
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+        setSession(nextSession);
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -46,7 +38,10 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const nextSession = { baseUrl, token };
+    const nextSession: ApiSession = {
+      token,
+      apiBaseUrl: import.meta.env.DEV ? apiBaseUrl : undefined,
+    };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
     setSession(nextSession);
   };
@@ -97,15 +92,17 @@ export function AuthGate({ children }: AuthGateProps) {
             API session
           </div>
           <form className="space-y-4" onSubmit={submit}>
-            <label className="block">
-              <div className="mb-2 text-sm font-semibold">API base URL</div>
-              <input
-                className="field"
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder={defaultApiBaseUrl()}
-              />
-            </label>
+            {showDevApiUrl ? (
+              <label className="block">
+                <div className="mb-2 text-sm font-semibold">API base URL</div>
+                <input
+                  className="field"
+                  value={apiBaseUrl}
+                  onChange={(event) => setApiBaseUrl(event.target.value)}
+                  placeholder="http://localhost:8000"
+                />
+              </label>
+            ) : null}
             <label className="block">
               <div className="mb-2 text-sm font-semibold">Shared token</div>
               <input

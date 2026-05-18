@@ -19,7 +19,7 @@ export function LeadsPage({ session }: LeadsPageProps) {
   const [toDate, setToDate] = useState("");
 
   const leadsQuery = useQuery({
-    queryKey: ["leads", session.baseUrl],
+    queryKey: ["leads"],
     queryFn: () => apiClient.listLeads(session, { page: 1, limit: 100 }),
   });
 

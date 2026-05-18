@@ -6,21 +6,25 @@ import {
 } from "../lib/types";
 
 export interface ApiSession {
-  baseUrl: string;
   token: string;
+  apiBaseUrl?: string;
 }
 
 interface RequestInitExtra extends RequestInit {
   query?: Record<string, string | number | undefined | null>;
 }
 
-function buildUrl(baseUrl: string, path: string, query?: RequestInitExtra["query"]) {
-  const normalizedBaseUrl = baseUrl.trim() || window.location.origin;
-  const base =
-    normalizedBaseUrl.startsWith("http://") || normalizedBaseUrl.startsWith("https://")
-      ? normalizedBaseUrl
-      : new URL(normalizedBaseUrl, window.location.origin).toString();
-  const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
+function apiBaseUrl(session: ApiSession) {
+  // Production is always same-origin through the dashboard Nginx /api proxy.
+  if (!import.meta.env.DEV) {
+    return "";
+  }
+  return session.apiBaseUrl || import.meta.env.VITE_API_BASE_URL || "";
+}
+
+function buildUrl(session: ApiSession, path: string, query?: RequestInitExtra["query"]) {
+  const baseUrl = apiBaseUrl(session);
+  const url = new URL(path, baseUrl ? (baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`) : window.location.origin);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== "") {
@@ -28,7 +32,7 @@ function buildUrl(baseUrl: string, path: string, query?: RequestInitExtra["query
       }
     }
   }
-  return url.toString();
+  return baseUrl ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 async function request<T>(
@@ -36,18 +40,30 @@ async function request<T>(
   path: string,
   init?: RequestInitExtra,
 ): Promise<T> {
-  const response = await fetch(buildUrl(session.baseUrl, path, init?.query), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
-      "X-Yantrix-Token": session.token,
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(session, path, init?.query), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+        "X-Yantrix-Token": session.token,
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      error instanceof TypeError
+        ? "Network error: dashboard could not reach the API proxy at /api."
+        : "Network error while contacting the API.",
+    );
+  }
 
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Authentication failed. Check the shared token.");
+    }
     throw new Error(text || `API request failed with status ${response.status}`);
   }
 
@@ -55,7 +71,11 @@ async function request<T>(
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error("API returned an invalid JSON response.");
+  }
 }
 
 export const apiClient = {

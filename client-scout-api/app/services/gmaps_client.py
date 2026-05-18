@@ -13,6 +13,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -194,11 +195,8 @@ def parse_gmaps_csv(raw_csv: str) -> list[GmapsRawBusiness]:
 
     for row in reader:
         try:
-            rating_str = row.get("rating", "").strip()
-            rating = float(rating_str) if rating_str else None
-
-            reviews_str = row.get("reviews_count", "").strip()
-            review_count = int(reviews_str) if reviews_str else None
+            rating = _parse_optional_float(row.get("rating", ""))
+            review_count = _parse_optional_int(row.get("reviews_count", ""))
 
             address = row.get("address", "").strip() or None
             city = _extract_city(address)
@@ -223,6 +221,24 @@ def parse_gmaps_csv(raw_csv: str) -> list[GmapsRawBusiness]:
 
     logger.info("Parsed %d businesses from gosom CSV", len(results))
     return results
+
+
+def _parse_optional_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = value.strip().replace(",", "")
+    if not cleaned:
+        return None
+    return float(cleaned)
+
+
+def _parse_optional_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    cleaned = re.sub(r"[^\d]", "", value)
+    if not cleaned:
+        return None
+    return int(cleaned)
 
 
 def _extract_city(address: str | None) -> str | None:

@@ -21,6 +21,7 @@ from app.models.audit import Audit
 from app.models.business import Business
 from app.models.config import NicheConfig
 from app.models.score import Score
+from app.services.agency_fit import AgencyFitResult, calculate_agency_fit
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ async def score_business(
     breakdown = compute_gap_breakdown(business, audit, weights)
     total_score = min(100, max(0, sum(breakdown.values())))
     fit_bucket = bucket_for_score(total_score)
+    agency_fit = calculate_agency_fit(business, audit)
 
     score = await _upsert_score(
         business_id=business_id,
@@ -110,6 +112,7 @@ async def score_business(
         niche_config_id=niche_config.id if niche_config else None,
         total_score=total_score,
         breakdown=breakdown,
+        agency_fit=agency_fit,
         db=db,
     )
 
@@ -313,6 +316,7 @@ async def _upsert_score(
     niche_config_id: uuid.UUID | None,
     total_score: int,
     breakdown: dict[str, int],
+    agency_fit: AgencyFitResult,
     db: AsyncSession,
 ) -> Score:
     """Upsert the score row while preserving the existing scores table schema."""
@@ -332,6 +336,10 @@ async def _upsert_score(
     score.urgency = breakdown[HIGH_TICKET]
     score.llm_provider = "rule_engine"
     score.llm_model = "gap_weighted_v1"
+    score.agency_fit_score = agency_fit.agency_fit_score
+    score.agency_fit_bucket = agency_fit.agency_fit_bucket
+    score.opportunity_types = agency_fit.opportunity_types
+    score.estimated_deal_value = agency_fit.estimated_deal_value
 
     await db.flush()
     return score

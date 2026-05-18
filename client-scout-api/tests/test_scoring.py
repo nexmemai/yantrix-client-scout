@@ -114,6 +114,7 @@ def make_audit(
     has_twitter: bool = False,
     page_speed_score: int | None = 90,
     load_time_ms: int | None = 1200,
+    tech_stack: list[str] | None = None,
     has_tel_links: bool = False,
 ) -> Audit:
     audit = Audit(
@@ -138,6 +139,7 @@ def make_audit(
         has_twitter=has_twitter,
         page_speed_score=page_speed_score,
         load_time_ms=load_time_ms,
+        tech_stack=tech_stack or [],
     )
     audit.has_tel_links = has_tel_links
     return audit
@@ -198,6 +200,7 @@ def test_compute_gap_breakdown_with_all_gaps_present():
         has_twitter=False,
         page_speed_score=20,
         load_time_ms=9000,
+        tech_stack=["WordPress"],
         has_tel_links=False,
     )
 
@@ -254,6 +257,10 @@ async def test_score_business_persists_grouped_scores_and_marks_qualified():
     assert outcome.score.urgency == 20
     assert outcome.score.niche_config_id == niche_config.id
     assert outcome.score.llm_model == "gap_weighted_v1"
+    assert outcome.score.agency_fit_score == 98
+    assert outcome.score.agency_fit_bucket == "hot"
+    assert "booking_system" in (outcome.score.opportunity_types or [])
+    assert outcome.score.estimated_deal_value == 150000
     assert business.stage == "qualified"
     assert session.flush_calls == 1
     assert session.refresh_calls == 1

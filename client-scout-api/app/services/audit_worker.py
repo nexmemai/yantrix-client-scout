@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import Audit
 from app.models.business import Business
+from app.services.pain_flags import build_pain_flags, detect_cms
 from app.services.snapshot_store import save_snapshot
 
 if TYPE_CHECKING:
@@ -224,6 +225,8 @@ async def _create_skipped_audit(business: Business, db: AsyncSession) -> Audit:
     audit = await _get_or_create_audit(business.id, db)
     audit.status = "skipped"
     audit.has_website = False
+    audit.pain_flags = build_pain_flags(audit)
+    audit.cms_detected = None
     audit.error_message = "NO_WEBSITE: No website_url available for this business."
     await db.commit()
     return audit
@@ -278,6 +281,8 @@ def _apply_signals_to_audit(
     audit.has_linkedin = signals.has_linkedin
     audit.has_twitter = signals.has_twitter
     audit.tech_stack = signals.tech_stack or []
+    audit.cms_detected = detect_cms(audit.tech_stack)
+    audit.pain_flags = build_pain_flags(audit)
     audit.raw_html_hash = signals.raw_html_hash or None
     audit.screenshot_url = snapshot_path
     audit.status = signals.status

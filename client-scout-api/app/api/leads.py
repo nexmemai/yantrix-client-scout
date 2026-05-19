@@ -21,7 +21,7 @@ from app.models.business import Business
 from app.models.pitch import Pitch
 from app.models.score import Score
 from app.schemas.audit import AuditRead
-from app.schemas.business import BusinessListItem, BusinessRead
+from app.schemas.business import BusinessListItem, BusinessRead, LeadSalesUpdate
 from app.schemas.score import ScoreRead
 from app.services.pitch_generator import (
     BusinessNotFoundError,
@@ -45,6 +45,9 @@ async def list_leads(
     category: str | None = Query(None, description="Filter by business category"),
     niche: str | None = Query(None, description="Filter by niche key"),
     bucket: str | None = Query(None, description="Filter by score bucket: high | mid | low"),
+    agency_fit_bucket: str | None = Query(None, description="Filter by agency fit bucket: hot | warm | cold | skip"),
+    lead_status: str | None = Query(None, description="Filter by sales status"),
+    priority_rank: int | None = Query(None, ge=0, le=100, description="Filter by priority rank"),
     created_after: datetime | None = Query(None, description="Only leads created after this timestamp"),
     source: str | None = Query(None, description="Filter by discovery source"),
     search: str | None = Query(None, description="Case-insensitive business name search"),
@@ -59,6 +62,9 @@ async def list_leads(
         category=category,
         niche=niche,
         bucket=bucket,
+        agency_fit_bucket=agency_fit_bucket,
+        lead_status=lead_status,
+        priority_rank=priority_rank,
         created_after=created_after,
         source=source,
         search=search,
@@ -214,6 +220,64 @@ async def send_lead_webhook(
     return {"status": "sent", "business_id": str(lead_id), "status_code": response.status_code}
 
 
+@router.patch(
+    "/{lead_id}/sales",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Update lightweight sales workflow fields for a lead",
+)
+async def update_lead_sales(
+    lead_id: uuid.UUID,
+    payload: LeadSalesUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    business = await _get_business_or_404(lead_id, db)
+    now = datetime.now(timezone.utc)
+
+    if payload.lead_status is not None:
+        business.lead_status = payload.lead_status
+        if payload.lead_status == "contacted" and payload.last_contacted_at is None:
+            business.last_contacted_at = business.last_contacted_at or now
+
+    if payload.follow_up_at is not None:
+        business.follow_up_at = payload.follow_up_at
+    if payload.last_contacted_at is not None:
+        business.last_contacted_at = payload.last_contacted_at
+    if payload.sales_notes is not None:
+        business.sales_notes = payload.sales_notes
+    if payload.priority_rank is not None:
+        business.priority_rank = payload.priority_rank
+    if payload.assigned_to is not None:
+        business.assigned_to = payload.assigned_to
+    if payload.increment_contact_attempts:
+        business.contact_attempts = (business.contact_attempts or 0) + 1
+        business.last_contacted_at = payload.last_contacted_at or now
+
+    await db.commit()
+    await db.refresh(business)
+    return _sales_payload(business)
+
+
+@router.post(
+    "/{lead_id}/contact-attempt",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Record a manual outreach attempt for a lead",
+)
+async def record_contact_attempt(
+    lead_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    business = await _get_business_or_404(lead_id, db)
+    business.contact_attempts = (business.contact_attempts or 0) + 1
+    business.last_contacted_at = datetime.now(timezone.utc)
+    if business.lead_status == "new":
+        business.lead_status = "contacted"
+    await db.commit()
+    await db.refresh(business)
+    return _sales_payload(business)
+
+
 @router.get(
     "/{lead_id}",
     response_model=dict,
@@ -275,6 +339,27 @@ async def get_lead(
         score=_score_read(business.score, pitch) if business.score else None,
     )
     return data.model_dump(mode="json")
+
+
+async def _get_business_or_404(lead_id: uuid.UUID, db: AsyncSession) -> Business:
+    result = await db.execute(select(Business).where(Business.id == lead_id))
+    business = result.scalar_one_or_none()
+    if business is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found.")
+    return business
+
+
+def _sales_payload(business: Business) -> dict:
+    return {
+        "business_id": str(business.id),
+        "lead_status": business.lead_status,
+        "follow_up_at": business.follow_up_at,
+        "last_contacted_at": business.last_contacted_at,
+        "contact_attempts": business.contact_attempts,
+        "sales_notes": business.sales_notes,
+        "priority_rank": business.priority_rank,
+        "assigned_to": business.assigned_to,
+    }
 
 
 def _lead_sort(sort: str) -> tuple:

@@ -24,6 +24,9 @@ def lead_filters(
     min_score: int | None = None,
     score_min: int | None = None,
     bucket: str | None = None,
+    agency_fit_bucket: str | None = None,
+    lead_status: str | None = None,
+    priority_rank: int | None = None,
     created_after: datetime | None = None,
 ) -> list:
     """Build composable SQLAlchemy filters for lead listing and export."""
@@ -46,6 +49,12 @@ def lead_filters(
 
     if bucket:
         filters.extend(_bucket_filters(bucket))
+    if agency_fit_bucket:
+        filters.append(func.lower(Score.agency_fit_bucket) == agency_fit_bucket.lower())
+    if lead_status:
+        filters.append(func.lower(Business.lead_status) == lead_status.lower())
+    if priority_rank is not None:
+        filters.append(Business.priority_rank == priority_rank)
     if created_after:
         filters.append(Business.created_at >= created_after)
     return filters

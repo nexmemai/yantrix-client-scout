@@ -1,5 +1,7 @@
 import {
   LeadDetail,
+  LeadSalesState,
+  LeadSalesUpdate,
   JobStatus,
   NicheConfig,
   PaginatedJobs,
@@ -108,6 +110,15 @@ export const apiClient = {
   },
   regeneratePitch(session: ApiSession, leadId: string) {
     return request<PitchResponse>(session, `/api/v1/leads/${leadId}/pitch`, { method: "POST" });
+  },
+  updateLeadSales(session: ApiSession, leadId: string, payload: LeadSalesUpdate) {
+    return request<LeadSalesState>(session, `/api/v1/leads/${leadId}/sales`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  recordContactAttempt(session: ApiSession, leadId: string) {
+    return request<LeadSalesState>(session, `/api/v1/leads/${leadId}/contact-attempt`, { method: "POST" });
   },
   listConfigs(session: ApiSession) {
     return request<NicheConfig[]>(session, "/api/v1/configs", { method: "GET" });

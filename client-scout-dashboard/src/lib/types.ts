@@ -115,6 +115,27 @@ export interface PaginatedLeads {
   items: LeadListItem[];
 }
 
+export interface LeadSalesUpdate {
+  lead_status?: string | null;
+  follow_up_at?: string | null;
+  last_contacted_at?: string | null;
+  increment_contact_attempts?: boolean;
+  sales_notes?: string | null;
+  priority_rank?: number | null;
+  assigned_to?: string | null;
+}
+
+export interface LeadSalesState {
+  business_id: string;
+  lead_status: string;
+  follow_up_at?: string | null;
+  last_contacted_at?: string | null;
+  contact_attempts: number;
+  sales_notes?: string | null;
+  priority_rank?: number | null;
+  assigned_to?: string | null;
+}
+
 export interface RunScoutPayload {
   niche: string;
   city: string;

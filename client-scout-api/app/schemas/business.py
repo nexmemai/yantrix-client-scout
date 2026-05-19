@@ -5,8 +5,20 @@ schemas/business.py — Pydantic schemas for Business CRUD operations.
 import uuid
 from datetime import datetime
 from typing import Any
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+LeadStatus = Literal[
+    "new",
+    "contacted",
+    "replied",
+    "meeting_set",
+    "proposal_sent",
+    "won",
+    "lost",
+    "ignored",
+]
 
 
 class BusinessBase(BaseModel):
@@ -83,6 +95,16 @@ class BusinessListItem(BaseModel):
     follow_up_at: datetime | None = None
     priority_rank: int | None = None
     created_at: datetime
+
+
+class LeadSalesUpdate(BaseModel):
+    lead_status: LeadStatus | None = None
+    follow_up_at: datetime | None = None
+    last_contacted_at: datetime | None = None
+    increment_contact_attempts: bool = False
+    sales_notes: str | None = None
+    priority_rank: int | None = Field(default=None, ge=0, le=100)
+    assigned_to: str | None = None
 
 
 # Forward refs resolved after AuditRead/ScoreRead are defined in their modules

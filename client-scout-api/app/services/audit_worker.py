@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import Audit
 from app.models.business import Business
+from app.services.contact_enrichment import apply_contact_enrichment, enrich_contact_from_site
 from app.services.pain_flags import build_pain_flags, detect_cms
 from app.services.snapshot_store import save_snapshot
 
@@ -138,6 +139,11 @@ async def run_audit_for_business(
             html=signals.raw_html,
             html_hash=signals.raw_html_hash,
         )
+        try:
+            enrichment = await enrich_contact_from_site(business, signals.raw_html, url)
+            apply_contact_enrichment(business, enrichment)
+        except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+            logger.warning("[%s] [AUDIT] contact enrichment skipped: %s", business_id, exc)
 
     # ── Step 6: Persist signals ───────────────────────────────────────────
     _apply_signals_to_audit(audit, signals, snapshot_path)

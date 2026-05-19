@@ -94,7 +94,9 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
   const painFlags = Object.entries(lead.audit?.pain_flags ?? {}).filter(([, active]) => active);
   const contactEmail = lead.contact_email ?? lead.email ?? "";
   const contactPhone = lead.contact_phone ?? lead.phone ?? "";
-  const emailPitch = `${lead.email_subject ?? ""}\n\n${lead.email_body ?? displayedPitch}`;
+  const emailBody = lead.email_body ?? displayedPitch;
+  const whatsappPitch = lead.whatsapp_message ?? displayedPitch;
+  const emailPitch = `${lead.email_subject ?? `Quick idea for ${lead.name}`}\n\n${emailBody}`;
 
   return (
     <div className="grid gap-4">
@@ -231,6 +233,16 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
           <div className="text-sm font-bold uppercase text-[var(--muted)]">Pitch</div>
           {pitchMutation.isError ? <div className="text-xs text-[var(--danger)]">{(pitchMutation.error as Error).message}</div> : null}
         </div>
+        {lead.pain_points_used?.length || lead.pitch_recommended_services?.length ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {lead.pain_points_used?.length ? (
+              <PitchMetaBlock title="Pitch uses these gaps" items={lead.pain_points_used} tone="amber" />
+            ) : null}
+            {lead.pitch_recommended_services?.length ? (
+              <PitchMetaBlock title="Recommended services" items={lead.pitch_recommended_services} tone="teal" />
+            ) : null}
+          </div>
+        ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           {lead.whatsapp_link ? (
             <a className="button button-primary h-10 px-3 text-sm font-semibold" href={lead.whatsapp_link} rel="noreferrer" target="_blank">
@@ -238,12 +250,45 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
               Send via WhatsApp
             </a>
           ) : null}
+          <button className="button button-secondary h-10 px-3 text-sm font-semibold" onClick={() => navigator.clipboard.writeText(whatsappPitch)}>
+            <Copy className="h-4 w-4" />
+            Copy WhatsApp
+          </button>
           <button className="button button-secondary h-10 px-3 text-sm font-semibold" onClick={() => navigator.clipboard.writeText(emailPitch)}>
             <Copy className="h-4 w-4" />
             Copy email pitch
           </button>
         </div>
-        <pre className="mt-4 whitespace-pre-wrap text-sm leading-7 text-[var(--text)]">{displayedPitch}</pre>
+        {lead.email_subject ? (
+          <div className="mt-5">
+            <div className="text-xs font-bold uppercase text-[var(--muted)]">Email subject</div>
+            <div className="mt-2 rounded-md border border-[var(--line)] bg-white/70 px-3 py-2 text-sm font-semibold">
+              {lead.email_subject}
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <PitchCopyBlock title="WhatsApp message" text={whatsappPitch} />
+          <PitchCopyBlock title="Email body" text={emailBody} />
+        </div>
+        {lead.whatsapp_follow_up || lead.call_opener ? (
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {lead.whatsapp_follow_up ? <PitchCopyBlock title="WhatsApp follow-up" text={lead.whatsapp_follow_up} compact /> : null}
+            {lead.call_opener ? <PitchCopyBlock title="Call opener" text={lead.call_opener} compact /> : null}
+          </div>
+        ) : null}
+        {lead.personalization_notes?.length ? (
+          <div className="mt-4">
+            <div className="text-xs font-bold uppercase text-[var(--muted)]">Personalization notes</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {lead.personalization_notes.map((item) => (
+                <span key={item} className="rounded-full border border-[var(--line)] bg-white/80 px-2 py-1 text-xs font-semibold text-[var(--muted)]">
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );
@@ -280,6 +325,36 @@ function Metric({ label, value }: { label: string; value: number }) {
       <div className="h-2 overflow-hidden rounded-full bg-stone-200">
         <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${Math.max(0, Math.min(value, 100))}%` }} />
       </div>
+    </div>
+  );
+}
+
+function PitchMetaBlock({ title, items, tone }: { title: string; items: string[]; tone: "amber" | "teal" }) {
+  const className =
+    tone === "amber"
+      ? "rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800"
+      : "rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800";
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase text-[var(--muted)]">{title}</div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span key={item} className={className}>
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PitchCopyBlock({ title, text, compact = false }: { title: string; text: string; compact?: boolean }) {
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase text-[var(--muted)]">{title}</div>
+      <pre className={`mt-2 whitespace-pre-wrap rounded-md border border-[var(--line)] bg-white/70 p-3 text-sm leading-7 text-[var(--text)] ${compact ? "min-h-24" : "min-h-48"}`}>
+        {text}
+      </pre>
     </div>
   );
 }

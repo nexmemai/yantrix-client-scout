@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -23,19 +23,24 @@ from app.models.business import Business
 from app.models.config import NicheConfig
 from app.models.pitch import Pitch
 from app.models.score import Score
-from app.services.scoring import bucket_for_score
+from app.services.pitch_context import build_pitch_context
+from app.services.pitch_strategy import (
+    build_rule_based_pitch,
+    build_structured_pitch_prompt,
+    parse_structured_pitch,
+    structured_pitch_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
 ProviderName = Literal["nvidia", "groq"]
 
-PROMPT_VERSION = "v2.0"
+PROMPT_VERSION = "v3.0"
 DEFAULT_TONE = "professional"
 SYSTEM_PROMPT = (
-    "You are a sales analyst for Yantrix Labs, an AI automation/website "
-    "systems studio in Jaipur. Write a 2-3 line pitch to this business based "
-    "on the audit findings, focusing on business outcomes: more leads, fewer "
-    "missed calls, and better automation."
+    "You are a senior B2B sales strategist for Yantrix Labs, an AI automation "
+    "and website systems studio. Generate specific, useful outreach copy from "
+    "the provided lead facts only. Return valid JSON only."
 )
 
 
@@ -57,6 +62,9 @@ class PitchDraft:
     llm_provider: str
     llm_model: str
     tokens_used: int | None = None
+    subject_line: str | None = None
+    recommended_services: list[str] = field(default_factory=list)
+    objection_handlers: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,9 +80,13 @@ async def generate_pitch(
     score: Score,
     niche_config: NicheConfig | None = None,
 ) -> PitchDraft:
-    """Generate a short pitch from loaded ORM context."""
+    """Generate structured channel-specific outreach from loaded ORM context."""
     settings = get_settings()
-    user_prompt = _build_user_prompt(business, audit, score, niche_config)
+    pitch_context = build_pitch_context(business, audit, score)
+    user_prompt = build_structured_pitch_prompt(
+        pitch_context,
+        niche_config.prompt_template if niche_config else None,
+    )
 
     for provider_config in _provider_chain(settings):
         try:
@@ -85,11 +97,15 @@ async def generate_pitch(
                 max_retries=max(1, settings.LLM_MAX_RETRIES),
                 timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
             )
+            structured = parse_structured_pitch(text, pitch_context)
             return PitchDraft(
-                pitch_notes=_clean_pitch_text(text),
+                pitch_notes=structured.email_body,
                 llm_provider=provider_config.provider,
                 llm_model=provider_config.model,
                 tokens_used=tokens,
+                subject_line=structured.email_subject,
+                recommended_services=structured.recommended_services,
+                objection_handlers=structured_pitch_metadata(structured),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -99,7 +115,16 @@ async def generate_pitch(
                 exc,
             )
 
-    raise PitchGenerationError("All configured LLM providers failed.")
+    structured = build_rule_based_pitch(pitch_context)
+    logger.warning("All configured LLM providers failed; using rule-based pitch fallback.")
+    return PitchDraft(
+        pitch_notes=structured.email_body,
+        llm_provider="rule_engine",
+        llm_model="structured_fallback_v3",
+        subject_line=structured.email_subject,
+        recommended_services=structured.recommended_services,
+        objection_handlers=structured_pitch_metadata(structured),
+    )
 
 
 async def generate_and_save_pitch(
@@ -137,9 +162,9 @@ async def generate_and_save_pitch(
         business_id=business_id,
         score_id=score.id,
         pitch_notes=draft.pitch_notes,
-        subject_line=None,
-        recommended_services=[],
-        objection_handlers=None,
+        subject_line=draft.subject_line,
+        recommended_services=draft.recommended_services,
+        objection_handlers=draft.objection_handlers,
         tone=tone,
         language=language,
         llm_provider=draft.llm_provider,
@@ -270,7 +295,7 @@ async def _call_nvidia(
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.35,
-        max_tokens=180,
+        max_tokens=700,
     )
     return _extract_completion(response)
 
@@ -291,7 +316,7 @@ async def _call_groq(
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.35,
-        max_tokens=180,
+        max_tokens=700,
     )
     return _extract_completion(response)
 
@@ -300,69 +325,6 @@ def _extract_completion(response: Any) -> tuple[str, int | None]:
     text = response.choices[0].message.content or ""
     tokens = response.usage.total_tokens if getattr(response, "usage", None) else None
     return text, tokens
-
-
-def _build_user_prompt(
-    business: Business,
-    audit: Audit,
-    score: Score,
-    niche_config: NicheConfig | None,
-) -> str:
-    findings = _audit_findings(audit)
-    niche_guidance = niche_config.prompt_template if niche_config else None
-    fit_bucket = bucket_for_score(score.overall_score)
-
-    lines = [
-        f"Business: {business.name}",
-        f"Category: {business.category or business.niche or 'local business'}",
-        f"City: {business.city or 'unknown'}",
-        f"Website: {business.website_url or 'not found'}",
-        f"Rating: {float(business.rating or 0):.1f}",
-        f"Review count: {business.review_count or 0}",
-        f"Score: {score.overall_score}/100 ({fit_bucket})",
-        f"Audit findings: {', '.join(findings) if findings else 'No major gaps detected.'}",
-    ]
-    if niche_guidance:
-        lines.append(f"Niche guidance: {niche_guidance}")
-
-    lines.append(
-        "Write only the pitch text. Keep it to 2-3 short lines. Do not invent facts."
-    )
-    return "\n".join(lines)
-
-
-def _audit_findings(audit: Audit) -> list[str]:
-    findings: list[str] = []
-    if not audit.has_website:
-        findings.append("no public website found")
-    if audit.has_website and not audit.ssl_valid:
-        findings.append("website is not secure")
-    if not audit.mobile_friendly:
-        findings.append("website is not mobile friendly")
-    if not audit.has_forms:
-        findings.append("no inquiry form")
-    if not audit.has_cta:
-        findings.append("weak call to action")
-    if not audit.has_whatsapp:
-        findings.append("no WhatsApp lead capture")
-    if not audit.has_booking:
-        findings.append("no online booking")
-    if not audit.has_chatbot:
-        findings.append("no automated chat")
-    if not (audit.has_facebook or audit.has_instagram or audit.has_linkedin or audit.has_twitter):
-        findings.append("limited social trust signals")
-    if audit.page_speed_score is not None and audit.page_speed_score < 50:
-        findings.append("slow page speed")
-    elif audit.load_time_ms and audit.load_time_ms > 5000:
-        findings.append("slow website load time")
-    return findings
-
-
-def _clean_pitch_text(text: str) -> str:
-    text = text.strip().strip('"').strip("'")
-    text = text.replace("```", "").strip()
-    lines = [line.strip(" -") for line in text.splitlines() if line.strip()]
-    return "\n".join(lines[:3]) if lines else text
 
 
 def _is_retryable_error(exc: Exception) -> bool:

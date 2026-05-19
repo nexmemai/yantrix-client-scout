@@ -102,8 +102,14 @@ export interface LeadDetail {
   priority_rank?: number | null;
   assigned_to?: string | null;
   whatsapp_link?: string | null;
+  whatsapp_message?: string | null;
+  whatsapp_follow_up?: string | null;
   email_subject?: string | null;
   email_body?: string | null;
+  call_opener?: string | null;
+  pain_points_used?: string[] | null;
+  pitch_recommended_services?: string[] | null;
+  personalization_notes?: string[] | null;
   created_at: string;
   updated_at: string;
   audit?: AuditRead | null;
@@ -218,6 +224,8 @@ export interface PitchResponse {
   id: string;
   business_id: string;
   pitch_notes: string;
+  subject_line?: string | null;
+  recommended_services?: string[] | null;
   llm_provider?: string | null;
   llm_model?: string | null;
   tokens_used?: number | null;

@@ -95,6 +95,14 @@ def make_score(business_id: uuid.UUID) -> Score:
         id=uuid.uuid4(),
         business_id=business_id,
         overall_score=72,
+        website_quality=55,
+        online_presence=60,
+        conversion_readiness=35,
+        urgency=80,
+        agency_fit_score=82,
+        agency_fit_bucket="hot",
+        opportunity_types=["booking_system", "whatsapp_integration"],
+        estimated_deal_value=75000,
         llm_provider="rule_engine",
         llm_model="gap_weighted_v1",
     )
@@ -136,7 +144,18 @@ async def test_generate_pitch_uses_nvidia_first(monkeypatch):
 
     async def fake_nvidia(provider_config, _system_prompt, _user_prompt, _timeout):
         calls.append(provider_config.provider)
-        return "Add WhatsApp and booking so SmileCare captures more patient inquiries.", 25
+        return """
+        {
+          "whatsapp_message": "Hi SmileCare Dental, I noticed patients cannot book online or message on WhatsApp easily. Yantrix Labs can help turn more mobile visitors into booked enquiries. Worth a quick 10-minute chat?",
+          "whatsapp_follow_up": "Checking if booking and WhatsApp follow-up is a priority this month.",
+          "email_subject": "Booking idea for SmileCare Dental",
+          "email_body": "Hi SmileCare Dental,\\n\\nI noticed the site has no online booking or WhatsApp lead path. That can create missed appointment enquiries. Yantrix Labs can help with a booking funnel and WhatsApp follow-up automation.\\n\\nWould a quick 10-minute call be useful?",
+          "call_opener": "I noticed patients may not have a fast way to book from your site.",
+          "pain_points_used": ["no online booking", "no WhatsApp lead path"],
+          "recommended_services": ["Online booking funnel", "WhatsApp lead follow-up automation"],
+          "personalization_notes": ["12 reviews with a 4.1 rating"]
+        }
+        """, 25
 
     async def fake_groq(*_args):
         calls.append("groq")
@@ -148,7 +167,13 @@ async def test_generate_pitch_uses_nvidia_first(monkeypatch):
 
     draft = await generate_pitch(business, audit, score, make_config())
 
-    assert draft.pitch_notes == "Add WhatsApp and booking so SmileCare captures more patient inquiries."
+    assert "no online booking" in draft.pitch_notes
+    assert draft.subject_line == "Booking idea for SmileCare Dental"
+    assert draft.recommended_services == [
+        "Online booking funnel",
+        "WhatsApp lead follow-up automation",
+    ]
+    assert draft.objection_handlers is not None
     assert draft.llm_provider == "nvidia"
     assert draft.llm_model == "primary-model"
     assert calls == ["nvidia"]
@@ -170,7 +195,18 @@ async def test_generate_pitch_falls_back_to_groq_after_rate_limit(monkeypatch):
 
     async def fake_groq(provider_config, _system_prompt, _user_prompt, _timeout):
         calls.append(provider_config.provider)
-        return "Reduce missed calls with WhatsApp capture and automated booking follow-up.", 17
+        return """
+        {
+          "whatsapp_message": "Hi SmileCare Dental, a booking and WhatsApp path could reduce missed patient enquiries. Open to a quick chat?",
+          "whatsapp_follow_up": "Worth looking at this next week?",
+          "email_subject": "Reducing missed patient enquiries",
+          "email_body": "Reduce missed calls with WhatsApp capture and automated booking follow-up.",
+          "call_opener": "I saw a few patient enquiry gaps.",
+          "pain_points_used": ["no online booking"],
+          "recommended_services": ["Online booking funnel"],
+          "personalization_notes": []
+        }
+        """, 17
 
     monkeypatch.setattr(pitch_generator, "get_settings", lambda: make_settings(LLM_MAX_RETRIES=1))
     monkeypatch.setattr(pitch_generator, "_call_nvidia", fake_nvidia)
@@ -181,7 +217,30 @@ async def test_generate_pitch_falls_back_to_groq_after_rate_limit(monkeypatch):
     assert draft.llm_provider == "groq"
     assert draft.llm_model == "groq-legacy-model"
     assert "missed calls" in draft.pitch_notes
+    assert draft.subject_line == "Reducing missed patient enquiries"
     assert calls == ["nvidia", "groq"]
+
+
+@pytest.mark.asyncio
+async def test_generate_pitch_uses_rule_based_fallback_when_providers_fail(monkeypatch):
+    business = make_business()
+    audit = make_audit(business.id)
+    score = make_score(business.id)
+
+    async def fake_provider(*_args):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(pitch_generator, "get_settings", lambda: make_settings(LLM_MAX_RETRIES=1))
+    monkeypatch.setattr(pitch_generator, "_call_nvidia", fake_provider)
+    monkeypatch.setattr(pitch_generator, "_call_groq", fake_provider)
+
+    draft = await generate_pitch(business, audit, score, None)
+
+    assert draft.llm_provider == "rule_engine"
+    assert draft.llm_model == "structured_fallback_v3"
+    assert "SmileCare Dental" in draft.pitch_notes
+    assert draft.subject_line == "Quick idea for SmileCare Dental"
+    assert "Online booking funnel" in draft.recommended_services
 
 
 @pytest.mark.asyncio
@@ -198,6 +257,9 @@ async def test_generate_and_save_pitch_persists_pitch(monkeypatch):
             llm_provider="nvidia",
             llm_model="primary-model",
             tokens_used=31,
+            subject_line="Better booking flow",
+            recommended_services=["Online booking funnel"],
+            objection_handlers='{"email_body":"Capture more leads."}',
         )
 
     monkeypatch.setattr(pitch_generator, "generate_pitch", fake_generate_pitch)
@@ -210,6 +272,9 @@ async def test_generate_and_save_pitch_persists_pitch(monkeypatch):
     assert pitch.llm_provider == "nvidia"
     assert pitch.llm_model == "primary-model"
     assert pitch.tokens_used == 31
+    assert pitch.subject_line == "Better booking flow"
+    assert pitch.recommended_services == ["Online booking funnel"]
+    assert pitch.objection_handlers == '{"email_body":"Capture more leads."}'
     assert session.added == [pitch]
     assert session.commit_calls == 1
     assert session.refresh_calls == 1

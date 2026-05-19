@@ -55,8 +55,14 @@ class BusinessBase(BaseModel):
     priority_rank: int | None = None
     assigned_to: str | None = None
     whatsapp_link: str | None = None
+    whatsapp_message: str | None = None
+    whatsapp_follow_up: str | None = None
     email_subject: str | None = None
     email_body: str | None = None
+    call_opener: str | None = None
+    pain_points_used: list[str] | None = None
+    pitch_recommended_services: list[str] | None = None
+    personalization_notes: list[str] | None = None
 
 
 class BusinessCreate(BusinessBase):

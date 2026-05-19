@@ -1,5 +1,6 @@
 import {
   LeadDetail,
+  LeadSummary,
   LeadSalesState,
   LeadSalesUpdate,
   JobStatus,
@@ -87,6 +88,9 @@ async function request<T>(
 export const apiClient = {
   listLeads(session: ApiSession, query?: RequestInitExtra["query"]) {
     return request<PaginatedLeads>(session, "/api/v1/leads", { method: "GET", query });
+  },
+  getLeadSummary(session: ApiSession) {
+    return request<LeadSummary>(session, "/api/v1/leads/summary", { method: "GET" });
   },
   runScout(session: ApiSession, payload: RunScoutPayload) {
     return request<RunScoutResponse>(session, "/api/v1/run-scout", {

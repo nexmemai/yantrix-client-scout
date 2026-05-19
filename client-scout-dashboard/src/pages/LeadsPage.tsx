@@ -30,6 +30,11 @@ export function LeadsPage({ session }: LeadsPageProps) {
     queryFn: () => apiClient.listLeads(session, { page: 1, limit: 100 }),
   });
 
+  const summaryQuery = useQuery({
+    queryKey: ["leads", "summary"],
+    queryFn: () => apiClient.getLeadSummary(session),
+  });
+
   const runScoutMutation = useMutation({
     mutationFn: () =>
       apiClient.runScout(session, {
@@ -179,6 +184,11 @@ export function LeadsPage({ session }: LeadsPageProps) {
             {filtered.length} visible
           </div>
         </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <SummaryStat label="Follow-ups today" value={summaryQuery.data?.followups_today ?? 0} />
+          <SummaryStat label="New hot leads" value={summaryQuery.data?.new_hot_leads ?? 0} />
+          <SummaryStat label="Stale contacted" value={summaryQuery.data?.stale_contacted ?? 0} />
+        </div>
         <form className="mt-5 grid gap-3 border-y border-[var(--line)] py-4 lg:grid-cols-[1fr_1fr_160px_auto]" onSubmit={submitRunScout}>
           <input
             className="field"
@@ -295,6 +305,15 @@ export function LeadsPage({ session }: LeadsPageProps) {
           </table>
         )}
       </section>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-2">
+      <div className="text-xs font-bold uppercase text-[var(--muted)]">{label}</div>
+      <div className="mt-1 text-xl font-extrabold">{value}</div>
     </div>
   );
 }

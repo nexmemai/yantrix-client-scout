@@ -139,6 +139,12 @@ export interface LeadSalesState {
   assigned_to?: string | null;
 }
 
+export interface LeadSummary {
+  followups_today: number;
+  new_hot_leads: number;
+  stale_contacted: number;
+}
+
 export interface RunScoutPayload {
   niche: string;
   city: string;

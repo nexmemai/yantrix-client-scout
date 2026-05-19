@@ -4,7 +4,7 @@ api/leads.py - DB-backed lead listing and detail endpoints.
 
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 
 import httpx
@@ -135,6 +135,44 @@ async def list_leads(
         "limit": limit,
         "pages": max(1, ceil(total / limit)) if total else 1,
         "items": items,
+    }
+
+
+@router.get(
+    "/summary",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Daily lead action summary",
+)
+async def lead_summary(db: AsyncSession = Depends(get_db)) -> dict:
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow_start = today_start + timedelta(days=1)
+    stale_cutoff = now - timedelta(days=7)
+
+    followups_today = await db.scalar(
+        select(func.count(Business.id)).where(
+            Business.follow_up_at >= today_start,
+            Business.follow_up_at < tomorrow_start,
+        )
+    ) or 0
+    new_hot_leads = await db.scalar(
+        select(func.count(Business.id))
+        .join(Score, Score.business_id == Business.id)
+        .where(Business.lead_status == "new", Score.agency_fit_bucket == "hot")
+    ) or 0
+    stale_contacted = await db.scalar(
+        select(func.count(Business.id)).where(
+            Business.lead_status == "contacted",
+            Business.last_contacted_at.is_not(None),
+            Business.last_contacted_at < stale_cutoff,
+        )
+    ) or 0
+
+    return {
+        "followups_today": followups_today,
+        "new_hot_leads": new_hot_leads,
+        "stale_contacted": stale_contacted,
     }
 
 

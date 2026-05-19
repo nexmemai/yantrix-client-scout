@@ -27,3 +27,19 @@ The dashboard stores the returned `job_id` and polls
 pill shows when the job is running, completed, or failed. When the job completes,
 the leads table refreshes automatically so newly discovered leads appear without
 manual reload.
+
+## Smart lead workspace
+
+The Leads page now includes a Today summary for follow-ups, new hot leads, and
+stale contacted leads. The table shows sales status and agency-fit value, and
+can filter by score bucket, agency fit, status, city, niche, and created date.
+
+Lead detail keeps the existing business, audit, score, and pitch cards, then
+adds:
+
+- enriched contact fields with copy buttons
+- budget/reliability, rating, and review count
+- pain flags from the audit
+- agency-fit score, opportunity tags, and estimated deal value
+- sales status, notes, next follow-up, and contact-attempt tracking
+- Send via WhatsApp and Copy email pitch actions

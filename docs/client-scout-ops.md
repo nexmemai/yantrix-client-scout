@@ -24,13 +24,82 @@
 
 `GET /api/v1/leads` supports pagination plus composable filters:
 
-`city`, `category`, `niche`, `bucket`, `created_after`, `source`, `search`, `min_score`, `page`, and `limit`.
+`city`, `category`, `niche`, `bucket`, `agency_fit_bucket`, `lead_status`,
+`priority_rank`, `created_after`, `source`, `search`, `min_score`, `page`, and
+`limit`.
 
 Example:
 
 ```text
 /api/v1/leads?niche=dental&city=Pune&bucket=high&created_after=2026-05-01T00:00:00Z&page=1&limit=25
 ```
+
+## Smart lead fields
+
+New runs now enrich leads with additive smart-lead fields where available:
+
+- Contact: `contact_name`, `contact_title`, `contact_email`, `contact_phone`,
+  `contact_linkedin_url`, `contact_confidence`
+- Reliability: `rating`, `review_count`, `primary_language`,
+  `has_recent_updates`, `budget_tier`, `reliability`
+- Pain: `audit.pain_flags`, `audit.cms_detected`
+- Agency fit: `agency_fit_score`, `agency_fit_bucket`, `opportunity_types`,
+  `estimated_deal_value`
+
+These fields are best-effort. Missing values should be treated as unknown, not
+as pipeline failures.
+
+## Mini-CRM workflow
+
+Update lightweight sales fields:
+
+```http
+PATCH /api/v1/leads/{id}/sales
+```
+
+```json
+{
+  "lead_status": "contacted",
+  "follow_up_at": "2026-05-20T10:00:00Z",
+  "sales_notes": "Follow up Friday.",
+  "priority_rank": 1,
+  "assigned_to": "founder"
+}
+```
+
+Record a manual outreach attempt:
+
+```http
+POST /api/v1/leads/{id}/contact-attempt
+```
+
+Lead statuses are `new`, `contacted`, `replied`, `meeting_set`,
+`proposal_sent`, `won`, `lost`, and `ignored`.
+
+## Daily action summary
+
+`GET /api/v1/leads/summary` returns:
+
+```json
+{
+  "followups_today": 4,
+  "new_hot_leads": 12,
+  "stale_contacted": 7
+}
+```
+
+The dashboard shows this at the top of the Leads page.
+
+## Manual outreach helpers
+
+Lead detail responses include:
+
+- `whatsapp_link`
+- `email_subject`
+- `email_body`
+
+The dashboard uses these for **Send via WhatsApp** and **Copy email pitch**.
+There is no email API integration yet.
 
 ## Export data
 

@@ -190,7 +190,7 @@ async def test_list_leads_uses_db_rows():
     business = make_business()
     session = FakeSession(
         scalars=[1],
-        results=[FakeResult(rows=[(business, True, 72)])],
+        results=[FakeResult(rows=[(business, True, 72, 82, "hot", 150000)])],
     )
 
     response = await list_leads(
@@ -198,6 +198,9 @@ async def test_list_leads_uses_db_rows():
         category=None,
         niche="dental",
         bucket="mid",
+        agency_fit_bucket=None,
+        lead_status=None,
+        priority_rank=None,
         created_after=NOW,
         source=None,
         search="Smile",
@@ -300,8 +303,8 @@ async def test_jobs_list_and_detail_use_real_schema():
         updated_at=NOW,
         completed_at=NOW,
     )
-    list_session = FakeSession(scalars=[1], results=[FakeResult(scalars=[job])])
-    detail_session = FakeSession(results=[FakeResult(scalar=job)])
+    list_session = FakeSession(scalars=[1, 0], results=[FakeResult(scalars=[job])])
+    detail_session = FakeSession(scalars=[0], results=[FakeResult(scalar=job)])
 
     listing = await list_jobs(
         status_filter=None,

@@ -46,3 +46,24 @@ background using the existing discovery, audit, score, and pitch services.
 Poll `GET /api/v1/jobs/{job_id}` to show job progress. The response includes
 `total_discovered`, `total_audited`, `total_scored`, derived `total_pitched`,
 and `last_updated_at`.
+
+## Smart lead engine fields
+
+Migration `004_smart_lead_engine.sql` adds nullable/default-safe fields for:
+
+- person-level contact enrichment on `businesses`
+- mini-CRM status, follow-up, attempts, and notes on `businesses`
+- `pain_flags` and `cms_detected` on `audits`
+- `agency_fit_score`, `agency_fit_bucket`, `opportunity_types`, and
+  `estimated_deal_value` on `scores`
+
+The existing score model remains compatible. `overall_score`, score breakdowns,
+audit booleans, and lead routes are still present.
+
+Useful endpoints:
+
+```text
+GET   /api/v1/leads/summary
+PATCH /api/v1/leads/{id}/sales
+POST  /api/v1/leads/{id}/contact-attempt
+```

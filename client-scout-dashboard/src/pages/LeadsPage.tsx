@@ -16,6 +16,8 @@ export function LeadsPage({ session }: LeadsPageProps) {
   const [city, setCity] = useState("");
   const [niche, setNiche] = useState("");
   const [bucket, setBucket] = useState<"" | "high-fit" | "mid-fit" | "low-fit">("");
+  const [agencyBucket, setAgencyBucket] = useState("");
+  const [leadStatus, setLeadStatus] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [runNiche, setRunNiche] = useState("dental");
@@ -71,10 +73,12 @@ export function LeadsPage({ session }: LeadsPageProps) {
       const matchesCity = city ? (item.city ?? "").toLowerCase().includes(city.toLowerCase()) : true;
       const matchesNiche = niche ? (item.category ?? "") === niche : true;
       const matchesBucket = bucket ? itemBucket === bucket : true;
+      const matchesAgency = agencyBucket ? item.agency_fit_bucket === agencyBucket : true;
+      const matchesStatus = leadStatus ? item.lead_status === leadStatus : true;
       const matchesDate = withinDateRange(item.created_at, fromDate, toDate);
-      return matchesCity && matchesNiche && matchesBucket && matchesDate;
+      return matchesCity && matchesNiche && matchesBucket && matchesAgency && matchesStatus && matchesDate;
     });
-  }, [bucket, city, fromDate, items, niche, toDate]);
+  }, [agencyBucket, bucket, city, fromDate, items, leadStatus, niche, toDate]);
 
   const columns = useMemo<ColumnDef<LeadListItem>[]>(
     () => [
@@ -100,6 +104,14 @@ export function LeadsPage({ session }: LeadsPageProps) {
         cell: ({ row }) => (row.original.has_website ? "Yes" : "No"),
       },
       {
+        header: "Status",
+        cell: ({ row }) => (
+          <span className="rounded-full border border-[var(--line)] bg-white/70 px-2 py-1 text-xs font-semibold">
+            {row.original.lead_status}
+          </span>
+        ),
+      },
+      {
         header: "Score",
         cell: ({ row }) => {
           const currentBucket = scoreBucket(row.original.overall_score);
@@ -112,6 +124,17 @@ export function LeadsPage({ session }: LeadsPageProps) {
             </div>
           );
         },
+      },
+      {
+        header: "Agency fit",
+        cell: ({ row }) => (
+          <div className="grid gap-1 text-sm">
+            <span className="font-semibold">{row.original.agency_fit_bucket ?? "-"}</span>
+            <span className="text-xs text-[var(--muted)]">
+              {row.original.estimated_deal_value ? `₹${row.original.estimated_deal_value.toLocaleString("en-IN")}` : "-"}
+            </span>
+          </div>
+        ),
       },
       {
         header: "Created",
@@ -203,7 +226,7 @@ export function LeadsPage({ session }: LeadsPageProps) {
             ) : null}
           </div>
         </form>
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <input className="field" placeholder="City" value={city} onChange={(event) => setCity(event.target.value)} />
           <select className="field" value={niche} onChange={(event) => setNiche(event.target.value)}>
             <option value="">All niches</option>
@@ -218,6 +241,24 @@ export function LeadsPage({ session }: LeadsPageProps) {
             <option value="high-fit">high-fit</option>
             <option value="mid-fit">mid-fit</option>
             <option value="low-fit">low-fit</option>
+          </select>
+          <select className="field" value={agencyBucket} onChange={(event) => setAgencyBucket(event.target.value)}>
+            <option value="">All agency fits</option>
+            <option value="hot">hot</option>
+            <option value="warm">warm</option>
+            <option value="cold">cold</option>
+            <option value="skip">skip</option>
+          </select>
+          <select className="field" value={leadStatus} onChange={(event) => setLeadStatus(event.target.value)}>
+            <option value="">All statuses</option>
+            <option value="new">new</option>
+            <option value="contacted">contacted</option>
+            <option value="replied">replied</option>
+            <option value="meeting_set">meeting_set</option>
+            <option value="proposal_sent">proposal_sent</option>
+            <option value="won">won</option>
+            <option value="lost">lost</option>
+            <option value="ignored">ignored</option>
           </select>
           <input className="field" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
           <input className="field" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />

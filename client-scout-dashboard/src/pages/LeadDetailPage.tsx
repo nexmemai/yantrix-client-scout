@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Copy, ExternalLink, MessageCircle, RefreshCw, Save } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { apiClient, ApiSession } from "../api/client";
 import { SignalPill } from "../components/SignalPill";
@@ -14,6 +14,9 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
   const { leadId = "" } = useParams();
   const queryClient = useQueryClient();
   const [freshPitch, setFreshPitch] = useState<string | null>(null);
+  const [statusDraft, setStatusDraft] = useState("new");
+  const [notesDraft, setNotesDraft] = useState("");
+  const [followUpDraft, setFollowUpDraft] = useState("");
 
   const leadQuery = useQuery({
     queryKey: ["lead", leadId],
@@ -29,7 +32,36 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
     },
   });
 
+  const salesMutation = useMutation({
+    mutationFn: () =>
+      apiClient.updateLeadSales(session, leadId, {
+        lead_status: statusDraft,
+        sales_notes: notesDraft,
+        follow_up_at: followUpDraft ? new Date(followUpDraft).toISOString() : null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+
+  const contactAttemptMutation = useMutation({
+    mutationFn: () => apiClient.recordContactAttempt(session, leadId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+
   const lead = leadQuery.data;
+  useEffect(() => {
+    if (lead) {
+      setStatusDraft(lead.lead_status);
+      setNotesDraft(lead.sales_notes ?? "");
+      setFollowUpDraft(lead.follow_up_at ? lead.follow_up_at.slice(0, 10) : "");
+    }
+  }, [lead]);
+
   const signals = useMemo<[string, boolean][]>( 
     () =>
       lead?.audit
@@ -59,6 +91,10 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
 
   const bucket = scoreBucket(lead.score?.overall_score);
   const displayedPitch = freshPitch ?? lead.score?.pitch_notes ?? "No pitch generated yet.";
+  const painFlags = Object.entries(lead.audit?.pain_flags ?? {}).filter(([, active]) => active);
+  const contactEmail = lead.contact_email ?? lead.email ?? "";
+  const contactPhone = lead.contact_phone ?? lead.phone ?? "";
+  const emailPitch = `${lead.email_subject ?? ""}\n\n${lead.email_body ?? displayedPitch}`;
 
   return (
     <div className="grid gap-4">
@@ -78,6 +114,11 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
               <span className="rounded-full border border-[var(--line)] bg-white/80 px-3 py-1 text-xs font-semibold">
                 Score {lead.score?.overall_score ?? 0}
               </span>
+              {lead.score?.agency_fit_bucket ? (
+                <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-800">
+                  Agency {lead.score.agency_fit_bucket} · {lead.score.agency_fit_score ?? 0}
+                </span>
+              ) : null}
             </div>
           </div>
           <button
@@ -98,8 +139,15 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
             <Info label="Website" value={lead.website_url ?? "-"} />
             <Info label="Phone" value={lead.phone ?? "-"} />
             <Info label="Email" value={lead.email ?? "-"} />
+            {lead.contact_name ? <Info label="Contact name" value={lead.contact_name} /> : null}
+            {lead.contact_title ? <Info label="Contact title" value={lead.contact_title} /> : null}
+            {contactEmail ? <CopyInfo label="Contact email" value={contactEmail} /> : null}
+            {contactPhone ? <CopyInfo label="Contact phone" value={contactPhone} /> : null}
+            {lead.contact_linkedin_url ? <Info label="LinkedIn" value={lead.contact_linkedin_url} /> : null}
+            {lead.contact_confidence ? <Info label="Contact confidence" value={`${lead.contact_confidence}%`} /> : null}
             <Info label="Rating" value={lead.rating ? `${lead.rating} / 5` : "-"} />
             <Info label="Review count" value={lead.review_count?.toString() ?? "-"} />
+            <Info label="Budget / Reliability" value={`${lead.budget_tier ?? "-"} / ${lead.reliability ?? "-"}`} />
             <Info label="Created" value={formatDate(lead.created_at)} />
           </div>
         </section>
@@ -111,9 +159,46 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
             <Metric label="Online presence" value={lead.score?.online_presence ?? 0} />
             <Metric label="Conversion readiness" value={lead.score?.conversion_readiness ?? 0} />
             <Metric label="Urgency" value={lead.score?.urgency ?? 0} />
+            <Metric label="Agency fit" value={lead.score?.agency_fit_score ?? 0} />
           </div>
+          {lead.score?.opportunity_types?.length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {lead.score.opportunity_types.map((item) => (
+                <span key={item} className="rounded-full bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800">
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {lead.score?.estimated_deal_value ? (
+            <div className="mt-4 text-sm font-semibold text-[var(--muted)]">
+              Estimated value ₹{lead.score.estimated_deal_value.toLocaleString("en-IN")}
+            </div>
+          ) : null}
         </section>
       </div>
+
+      <section className="surface-strong p-5">
+        <div className="text-sm font-bold uppercase text-[var(--muted)]">Sales workflow</div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[220px_220px_minmax(0,1fr)_auto_auto]">
+          <select className="field" value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}>
+            {["new", "contacted", "replied", "meeting_set", "proposal_sent", "won", "lost", "ignored"].map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <input className="field" type="date" value={followUpDraft} onChange={(event) => setFollowUpDraft(event.target.value)} />
+          <input className="field" value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} placeholder="Sales notes" />
+          <button className="button button-secondary h-11 px-3 text-sm font-semibold" onClick={() => contactAttemptMutation.mutate()}>
+            <MessageCircle className="h-4 w-4" />
+            Attempt {lead.contact_attempts}
+          </button>
+          <button className="button button-primary h-11 px-3 text-sm font-semibold" onClick={() => salesMutation.mutate()}>
+            <Save className="h-4 w-4" />
+            Save
+          </button>
+        </div>
+        <div className="mt-3 text-xs text-[var(--muted)]">Last contacted: {formatDate(lead.last_contacted_at)}</div>
+      </section>
 
       <section className="surface-strong p-5">
         <div className="text-sm font-bold uppercase text-[var(--muted)]">Audit signals</div>
@@ -127,14 +212,36 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
             <Info label="Load time" value={lead.audit.load_time_ms ? `${lead.audit.load_time_ms} ms` : "-"} />
             <Info label="PageSpeed" value={lead.audit.page_speed_score?.toString() ?? "-"} />
             <Info label="Tech stack" value={lead.audit.tech_stack?.join(", ") || "-"} />
+            <Info label="CMS" value={lead.audit.cms_detected ?? "-"} />
           </div>
         )}
+        {painFlags.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {painFlags.map(([flag]) => (
+              <span key={flag} className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                {flag.replace("pain_", "").replaceAll("_", " ")}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="surface-strong p-5">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold uppercase text-[var(--muted)]">Pitch</div>
           {pitchMutation.isError ? <div className="text-xs text-[var(--danger)]">{(pitchMutation.error as Error).message}</div> : null}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {lead.whatsapp_link ? (
+            <a className="button button-primary h-10 px-3 text-sm font-semibold" href={lead.whatsapp_link} rel="noreferrer" target="_blank">
+              <ExternalLink className="h-4 w-4" />
+              Send via WhatsApp
+            </a>
+          ) : null}
+          <button className="button button-secondary h-10 px-3 text-sm font-semibold" onClick={() => navigator.clipboard.writeText(emailPitch)}>
+            <Copy className="h-4 w-4" />
+            Copy email pitch
+          </button>
         </div>
         <pre className="mt-4 whitespace-pre-wrap text-sm leading-7 text-[var(--text)]">{displayedPitch}</pre>
       </section>
@@ -147,6 +254,18 @@ function Info({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-xs font-bold uppercase text-[var(--muted)]">{label}</div>
       <div className="mt-2 text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function CopyInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs font-bold uppercase text-[var(--muted)]">{label}</div>
+      <button className="mt-2 inline-flex items-center gap-2 text-left text-sm font-semibold" onClick={() => navigator.clipboard.writeText(value)}>
+        {value}
+        <Copy className="h-3.5 w-3.5 text-[var(--muted)]" />
+      </button>
     </div>
   );
 }

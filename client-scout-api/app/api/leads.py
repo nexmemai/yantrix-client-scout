@@ -23,6 +23,7 @@ from app.models.score import Score
 from app.schemas.audit import AuditRead
 from app.schemas.business import BusinessListItem, BusinessRead, LeadSalesUpdate
 from app.schemas.score import ScoreRead
+from app.services.outreach_helpers import build_outreach_payload
 from app.services.pitch_generator import (
     BusinessNotFoundError,
     PitchContextMissingError,
@@ -298,6 +299,7 @@ async def get_lead(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found.")
 
     pitch = await _latest_pitch(lead_id, db)
+    outreach = build_outreach_payload(business, pitch)
     data = BusinessRead(
         id=business.id,
         name=business.name,
@@ -332,6 +334,9 @@ async def get_lead(
         sales_notes=business.sales_notes,
         priority_rank=business.priority_rank,
         assigned_to=business.assigned_to,
+        whatsapp_link=outreach.whatsapp_link,
+        email_subject=outreach.email_subject,
+        email_body=outreach.email_body,
         discovery_job_id=business.discovery_job_id,
         created_at=business.created_at,
         updated_at=business.updated_at,

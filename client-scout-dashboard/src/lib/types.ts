@@ -101,6 +101,9 @@ export interface LeadDetail {
   sales_notes?: string | null;
   priority_rank?: number | null;
   assigned_to?: string | null;
+  whatsapp_link?: string | null;
+  email_subject?: string | null;
+  email_body?: string | null;
   created_at: string;
   updated_at: string;
   audit?: AuditRead | null;

@@ -4,6 +4,7 @@ schemas/config.py - Pydantic schemas for niche scoring config.
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +16,10 @@ DEFAULT_WEIGHTS = {
     "trust_gap": 10,
     "automation_gap": 15,
 }
+
+# Mirrors TONE_DIRECTIVES in app/services/pitch_generator.py and the DB
+# CHECK constraint in migration 007. Keep all three in sync.
+PitchTone = Literal["professional", "friendly", "urgent", "consultative"]
 
 
 class ScoringWeights(BaseModel):
@@ -33,6 +38,8 @@ class ScoringConfigRead(BaseModel):
     niche: str
     weights: dict[str, int]
     prompt_template: str | None = None
+    # NULL means "use the system default tone for this niche".
+    pitch_tone: PitchTone | None = None
     is_default: bool
     created_at: datetime
     updated_at: datetime
@@ -43,3 +50,4 @@ class ScoringConfigUpdate(BaseModel):
 
     weights: ScoringWeights
     prompt_template: str | None = None
+    pitch_tone: PitchTone | None = None

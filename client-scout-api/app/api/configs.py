@@ -74,6 +74,7 @@ async def upsert_config(
 
     config.weights = payload.weights.model_dump()
     config.prompt_template = payload.prompt_template
+    config.pitch_tone = payload.pitch_tone
     config.updated_at = now
     await db.commit()
     await db.refresh(config)
@@ -113,6 +114,7 @@ def _to_read(config: NicheConfig) -> ScoringConfigRead:
         niche=config.niche,
         weights={**DEFAULT_WEIGHTS, **(config.weights or {})},
         prompt_template=config.prompt_template,
+        pitch_tone=config.pitch_tone,
         is_default=config.is_default,
         created_at=config.created_at,
         updated_at=config.updated_at,

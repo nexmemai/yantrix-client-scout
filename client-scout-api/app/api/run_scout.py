@@ -77,7 +77,15 @@ class RunScoutRequest(BaseModel):
     auto_audit: bool = Field(True, description="Run website audit for each business")
     auto_score: bool = Field(True, description="Run scoring after audit")
     auto_pitch: bool = Field(True, description="Generate pitches for high/mid-fit leads")
-    pitch_tone: str = Field("professional", description="Pitch tone metadata")
+    pitch_tone: str = Field(
+        "auto",
+        description=(
+            "Pitch tone override. The default 'auto' means 'use the tone "
+            "configured on the matched niche_config row, falling back to "
+            "the system default'. Pass an explicit value only when you want "
+            "to override the niche's configured tone for one run."
+        ),
+    )
 
     @field_validator("niche")
     @classmethod
@@ -183,6 +191,17 @@ async def run_scout(
             detail=str(exc),
         ) from exc
 
+    # Tone resolution:
+    #   * "auto" => use the niche's configured tone, else system default.
+    #   * any explicit value (professional|friendly|urgent|consultative)
+    #     wins over the niche default for this single run only.
+    if payload.pitch_tone == "auto":
+        effective_tone = resolved.tone or "auto"
+        tone_source = "niche_config" if resolved.tone else "system_default"
+    else:
+        effective_tone = payload.pitch_tone
+        tone_source = "request_override"
+
     await _enforce_hourly_run_limit(
         resolved.key,
         payload.city,
@@ -209,7 +228,7 @@ async def run_scout(
     await db.refresh(job)
 
     logger.info(
-        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s",
+        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s",
         job.id,
         payload.niche,
         resolved.key,
@@ -218,6 +237,8 @@ async def run_scout(
         payload.depth,
         payload.max_businesses,
         resolved.source,
+        effective_tone,
+        tone_source,
     )
 
     # Idempotency: ARQ deduplicates identical _job_ids, so a retried client
@@ -235,7 +256,7 @@ async def run_scout(
         auto_audit=payload.auto_audit,
         auto_score=payload.auto_score,
         auto_pitch=payload.auto_pitch,
-        pitch_tone=payload.pitch_tone,
+        pitch_tone=effective_tone,
         _job_id=enqueue_job_id,
     )
     if enqueued is None:
@@ -258,6 +279,8 @@ async def run_scout(
             "city": payload.city,
             "max_businesses": payload.max_businesses,
             "resolution_source": resolved.source,
+            "pitch_tone": effective_tone,
+            "tone_source": tone_source,
         },
     )
 

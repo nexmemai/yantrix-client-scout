@@ -602,8 +602,11 @@ async def _process_one_business(
                     and score_outcome is not None
                     and score_outcome.fit_bucket in pitchable_buckets
                 ):
-                    tone = "professional" if pitch_tone == "auto" else pitch_tone
-                    await pitch_runner(business_id=business_id, db=db, tone=tone)
+                    # Pass the resolved tone straight through. The string
+                    # "auto" tells generate_and_save_pitch -> pitch_generator
+                    # to use DEFAULT_TONE; everything else is a concrete tone
+                    # the prompt already knows how to apply.
+                    await pitch_runner(business_id=business_id, db=db, tone=pitch_tone)
                     outcome["pitched"] = True
 
                 if redis is not None:

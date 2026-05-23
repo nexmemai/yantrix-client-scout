@@ -8,9 +8,12 @@ export function scoreBucket(score?: number | null): ScoreBucket {
 }
 
 export function scoreBucketTone(bucket: ScoreBucket): string {
+  // Soft tinted backgrounds + saturated foregrounds, matching the .pill
+  // family in index.css. Returned as raw Tailwind classes so the same
+  // helper works on both <span className="pill ..."> and bespoke chips.
   if (bucket === "high-fit") return "bg-emerald-100 text-emerald-800";
   if (bucket === "mid-fit") return "bg-amber-100 text-amber-800";
-  return "bg-stone-200 text-stone-700";
+  return "bg-zinc-100 text-zinc-700";
 }
 
 export function formatDate(value?: string | null): string {

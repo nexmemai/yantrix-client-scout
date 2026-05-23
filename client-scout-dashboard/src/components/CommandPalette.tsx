@@ -274,16 +274,22 @@ export function CommandPalette({ session }: CommandPaletteProps) {
   );
 
   if (!open) {
+    // Topbar trigger: looks like a search field, behaves like a button. The
+    // wider tap-target and visible kbd hint make Cmd+K discoverable to
+    // operators who haven't read the keyboard cheat-sheet, which is most of
+    // them on day one.
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="button button-secondary h-9 px-3 text-xs font-semibold text-[var(--muted)]"
+        className="group flex h-9 min-w-[12rem] items-center justify-between gap-3 rounded-[10px] border border-[var(--line-strong)] bg-white px-3 text-sm font-medium text-zinc-500 shadow-[var(--shadow-sm)] transition-all duration-200 hover:border-emerald-300 hover:text-zinc-800 hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 sm:min-w-[16rem]"
         aria-label="Open command palette (Cmd+K)"
       >
-        <Search className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Search</span>
-        <kbd className="ml-1 hidden rounded border border-[var(--line)] bg-white/70 px-1.5 py-[1px] text-[10px] font-bold text-[var(--muted)] sm:inline">
+        <span className="flex items-center gap-2">
+          <Search className="h-3.5 w-3.5 text-zinc-400 transition-colors group-hover:text-emerald-500" />
+          <span>Search or run a command…</span>
+        </span>
+        <kbd className="hidden rounded-md border border-[var(--line)] bg-zinc-50 px-1.5 py-[1px] text-[10px] font-semibold text-zinc-500 sm:inline">
           ⌘K
         </kbd>
       </button>
@@ -295,14 +301,14 @@ export function CommandPalette({ session }: CommandPaletteProps) {
       role="dialog"
       aria-modal
       aria-label="Command palette"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-24"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-zinc-950/40 px-4 pt-[15vh] backdrop-blur-sm animate-fade-in"
       onClick={(event) => {
         if (event.target === event.currentTarget) setOpen(false);
       }}
     >
-      <div className="surface-strong w-full max-w-xl overflow-hidden border border-[var(--line)] shadow-2xl">
-        <div className="flex items-center gap-2 border-b border-[var(--line)] px-3 py-2.5">
-          <Search className="h-4 w-4 text-[var(--muted)]" />
+      <div className="surface-glass w-full max-w-2xl overflow-hidden animate-slide-up">
+        <div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-3">
+          <Search className="h-4 w-4 text-zinc-400" />
           <input
             ref={inputRef}
             value={query}
@@ -321,23 +327,24 @@ export function CommandPalette({ session }: CommandPaletteProps) {
               }
             }}
             placeholder='Try "Run scout: dental in Pune", "Filter: hot", "Open board"…'
-            className="flex-1 bg-transparent text-sm outline-none"
+            className="flex-1 bg-transparent text-[15px] text-zinc-900 placeholder:text-zinc-400 outline-none"
             aria-label="Command input"
           />
-          <kbd className="rounded border border-[var(--line)] bg-white/70 px-1.5 py-[1px] text-[10px] font-bold text-[var(--muted)]">
+          <kbd className="rounded-md border border-[var(--line)] bg-white/80 px-1.5 py-[1px] text-[10px] font-semibold text-zinc-500">
             esc
           </kbd>
         </div>
 
-        <div className="max-h-[55vh] overflow-y-auto py-1">
+        <div className="max-h-[55vh] overflow-y-auto px-2 py-2">
           {flatItems.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-[var(--muted)]">
-              No commands match. Try the syntax in the placeholder.
+            <div className="px-4 py-8 text-center text-sm text-zinc-500">
+              No commands match.{" "}
+              <span className="text-zinc-400">Try the syntax in the placeholder.</span>
             </div>
           ) : (
             suggestions.map((group) => (
               <Fragment key={group.heading}>
-                <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                <div className="px-3 pb-1.5 pt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-400">
                   {group.heading}
                 </div>
                 {group.items.map((item) => {
@@ -349,21 +356,21 @@ export function CommandPalette({ session }: CommandPaletteProps) {
                       type="button"
                       onMouseEnter={() => setHighlightIndex(flatIndex)}
                       onClick={() => runCommand(item)}
-                      className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm ${
-                        active ? "bg-[var(--accent)]/10" : ""
+                      className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-sm transition-colors ${
+                        active
+                          ? "bg-emerald-50 text-emerald-900"
+                          : "text-zinc-700 hover:bg-zinc-100"
                       }`}
                     >
                       <CommandIcon kind={item.kind} />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-[var(--text)]">
-                          {item.label}
-                        </div>
+                        <div className="truncate font-medium">{item.label}</div>
                         {item.hint ? (
-                          <div className="truncate text-xs text-[var(--muted)]">{item.hint}</div>
+                          <div className="truncate text-xs text-zinc-500">{item.hint}</div>
                         ) : null}
                       </div>
                       {active ? (
-                        <ArrowRight className="h-3.5 w-3.5 text-[var(--accent)]" />
+                        <ArrowRight className="h-3.5 w-3.5 text-emerald-600" />
                       ) : null}
                     </button>
                   );
@@ -371,6 +378,21 @@ export function CommandPalette({ session }: CommandPaletteProps) {
               </Fragment>
             ))
           )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-[var(--line)] bg-zinc-50/60 px-4 py-2 text-[11px] font-medium text-zinc-500">
+          <span className="flex items-center gap-3">
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border border-[var(--line)] bg-white px-1 py-[1px] font-semibold">↑</kbd>
+              <kbd className="rounded border border-[var(--line)] bg-white px-1 py-[1px] font-semibold">↓</kbd>
+              navigate
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border border-[var(--line)] bg-white px-1 py-[1px] font-semibold">⏎</kbd>
+              run
+            </span>
+          </span>
+          <span>{flatItems.length} commands</span>
         </div>
       </div>
     </div>
@@ -380,14 +402,14 @@ export function CommandPalette({ session }: CommandPaletteProps) {
 function CommandIcon({ kind }: { kind: ParsedCommand["kind"] }) {
   switch (kind) {
     case "run_scout":
-      return <Play className="h-3.5 w-3.5 text-[var(--accent)]" />;
+      return <Play className="h-3.5 w-3.5 text-emerald-600" />;
     case "filter":
-      return <Filter className="h-3.5 w-3.5 text-[var(--warm)]" />;
+      return <Filter className="h-3.5 w-3.5 text-amber-600" />;
     case "navigate":
-      return <Trello className="h-3.5 w-3.5 text-[var(--accent)]" />;
+      return <Trello className="h-3.5 w-3.5 text-violet-600" />;
     case "export_csv":
-      return <Table2 className="h-3.5 w-3.5 text-[var(--muted)]" />;
+      return <Table2 className="h-3.5 w-3.5 text-zinc-500" />;
     default:
-      return <Search className="h-3.5 w-3.5 text-[var(--muted)]" />;
+      return <Search className="h-3.5 w-3.5 text-zinc-400" />;
   }
 }

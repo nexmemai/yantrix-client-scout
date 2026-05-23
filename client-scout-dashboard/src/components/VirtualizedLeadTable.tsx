@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, MessageCircle } from "lucide-react";
+import { ChevronRight, Inbox, MessageCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ApiSession, apiClient } from "../api/client";
 import {
@@ -51,11 +51,48 @@ const QUICK_STATUSES: Array<{
   label: string;
   className: string;
 }> = [
-  { key: "new",        apiValue: "new",         label: "New",       className: "bg-stone-300" },
+  { key: "new",        apiValue: "new",         label: "New",       className: "bg-zinc-300" },
   { key: "contacted",  apiValue: "contacted",   label: "Contacted", className: "bg-amber-400" },
   { key: "qualified",  apiValue: "meeting_set", label: "Qualified", className: "bg-sky-500" },
   { key: "won",        apiValue: "won",         label: "Won",       className: "bg-emerald-500" },
 ];
+
+// Soft-tinted status pill classes, Linear/Attio style: low-saturation bg
+// + saturated foreground. Fallback covers any backend-only state we
+// haven't styled yet (e.g. a future "qualified_meeting_held").
+function leadStatusPillClass(status: string): string {
+  switch (status) {
+    case "new":
+      return "bg-zinc-100 text-zinc-700";
+    case "contacted":
+      return "bg-amber-100 text-amber-800";
+    case "replied":
+      return "bg-sky-100 text-sky-800";
+    case "meeting_set":
+      return "bg-violet-100 text-violet-800";
+    case "proposal_sent":
+      return "bg-indigo-100 text-indigo-800";
+    case "won":
+      return "bg-emerald-100 text-emerald-800";
+    case "lost":
+      return "bg-rose-100 text-rose-800";
+    case "ignored":
+      return "bg-zinc-100 text-zinc-500";
+    default:
+      return "bg-zinc-100 text-zinc-700";
+  }
+}
+
+function leadStatusLabel(status: string): string {
+  // Operator-friendly labels. We never show backend-internal underscored
+  // names in tooltips/badges - they read like database columns.
+  switch (status) {
+    case "meeting_set":   return "Qualified";
+    case "proposal_sent": return "Proposal";
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
 
 export function VirtualizedLeadTable({
   session,
@@ -232,7 +269,14 @@ export function VirtualizedLeadTable({
   return (
     <section className="surface-strong table-wrap">
       {isLoading && rows.length === 0 ? (
-        <div className="p-6 text-sm text-[var(--muted)]">Loading leads…</div>
+        // Skeleton rows while the first page loads. Three matches the visible
+        // window most operators see before scrolling, so the layout doesn't
+        // jump on first paint.
+        <div className="grid gap-3 p-5">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <div key={idx} className="skeleton h-12 w-full" />
+          ))}
+        </div>
       ) : (
         <>
           <table>
@@ -265,8 +309,8 @@ export function VirtualizedLeadTable({
               ))}
               {rows.length === 0 && !isLoading ? (
                 <tr>
-                  <td colSpan={8} className="p-6 text-sm text-[var(--muted)]">
-                    No leads match the current filters.
+                  <td colSpan={8} className="px-5 py-12">
+                    <EmptyTableState />
                   </td>
                 </tr>
               ) : null}
@@ -274,7 +318,7 @@ export function VirtualizedLeadTable({
           </table>
           <div
             ref={sentinelRef}
-            className="flex items-center justify-center py-3 text-xs text-[var(--muted)]"
+            className="flex items-center justify-center py-3 text-xs font-medium text-zinc-400"
             aria-live="polite"
           >
             {isFetchingNextPage
@@ -290,6 +334,33 @@ export function VirtualizedLeadTable({
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Empty state for the pipeline table.
+ *
+ * The previous "No leads match the current filters." string read like an
+ * error condition. The redesign frames it as a deliberate state with a
+ * soft icon, a clear explanation, and a discoverability hint that the
+ * command palette is the fastest way to either run a scout or clear the
+ * filter, instead of forcing the operator to dig through the form.
+ */
+function EmptyTableState() {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+        <Inbox className="h-5 w-5" />
+      </div>
+      <div className="mt-4 text-sm font-semibold text-zinc-900">No leads match these filters</div>
+      <div className="mt-1 text-xs text-zinc-500">
+        Loosen a filter, or press
+        <kbd className="mx-1 rounded border border-zinc-200 bg-white px-1 py-[1px] text-[10px] font-semibold text-zinc-600">
+          ⌘K
+        </kbd>
+        to run a fresh scout.
+      </div>
+    </div>
   );
 }
 
@@ -315,48 +386,56 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
     <tr className={isPending ? "opacity-70" : undefined}>
       <td>
         <Link
-          className="table-row-link flex items-center justify-between gap-3 rounded-md px-2 py-1 -mx-2"
+          className="table-row-link -mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-1"
           to={`/leads/${lead.id}`}
         >
           <div className="min-w-0">
-            <div className="truncate font-semibold">{lead.name}</div>
-            <div className="text-xs text-[var(--muted)]">
+            <div className="truncate text-[14px] font-semibold text-zinc-900">{lead.name}</div>
+            <div className="truncate text-[12px] text-zinc-400">
               {lead.category ?? "Unknown niche"}
             </div>
           </div>
-          <ChevronRight className="h-4 w-4 text-[var(--muted)]" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-zinc-300 transition-colors group-hover:text-zinc-500" />
         </Link>
       </td>
-      <td>{lead.city}</td>
-      <td>{lead.has_website ? "Yes" : "No"}</td>
+      <td className="text-[13px] text-zinc-700">{lead.city ?? "—"}</td>
       <td>
-        <span className="rounded-full border border-[var(--line)] bg-white/70 px-2 py-1 text-xs font-semibold">
-          {lead.lead_status}
+        {lead.has_website ? (
+          <span className="pill pill-emerald">Yes</span>
+        ) : (
+          <span className="pill pill-zinc">No</span>
+        )}
+      </td>
+      <td>
+        <span className={`pill ${leadStatusPillClass(lead.lead_status)}`}>
+          {leadStatusLabel(lead.lead_status)}
         </span>
       </td>
       <td>
         <div className="flex items-center gap-2">
-          <span className="font-semibold">{lead.overall_score ?? 0}</span>
-          <span
-            className={`rounded-full px-2 py-1 text-xs font-semibold ${scoreBucketTone(currentBucket)}`}
-          >
+          <span className="text-[14px] font-semibold tabular-nums text-zinc-900">
+            {lead.overall_score ?? 0}
+          </span>
+          <span className={`pill ${scoreBucketTone(currentBucket)}`}>
             {currentBucket}
           </span>
         </div>
       </td>
       <td>
-        <div className="grid gap-1 text-sm">
-          <span className="font-semibold">{lead.agency_fit_bucket ?? "-"}</span>
-          <span className="text-xs text-[var(--muted)]">
+        <div className="grid gap-0.5">
+          <span className="text-[13px] font-semibold capitalize text-zinc-800">
+            {lead.agency_fit_bucket ?? "—"}
+          </span>
+          <span className="text-[11px] tabular-nums text-zinc-400">
             {lead.estimated_deal_value
               ? `₹${lead.estimated_deal_value.toLocaleString("en-IN")}`
-              : "-"}
+              : "—"}
           </span>
         </div>
       </td>
-      <td>{formatDate(lead.created_at)}</td>
+      <td className="text-[12px] text-zinc-500">{formatDate(lead.created_at)}</td>
       <td>
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-2">
           {/* WhatsApp deep-link icon. Detail fetch happens on click, not on hover,
               to avoid a wave of GETs as the user scrolls. */}
           <button
@@ -367,14 +446,16 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
               swallow(event);
               onWhatsApp();
             }}
-            className="rounded-md border border-[var(--line)] bg-white/70 p-1.5 transition hover:border-emerald-400 hover:text-emerald-600"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[var(--shadow-sm)] transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
           >
             <MessageCircle className="h-3.5 w-3.5" />
           </button>
 
           {/* Four status dots. Each is keyboard accessible (aria-label) and
-              shows the canonical operator label as a tooltip. */}
-          <div className="flex items-center gap-1 rounded-full border border-[var(--line)] bg-white/70 p-1">
+              shows the canonical operator label as a tooltip. The active
+              dot gets an emerald ring + small scale-up so it pops without
+              shifting layout. */}
+          <div className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white p-1 shadow-[var(--shadow-sm)]">
             {QUICK_STATUSES.map((status) => {
               const active = lead.lead_status === status.apiValue;
               return (
@@ -389,10 +470,10 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
                     onSetStatus(status.apiValue);
                   }}
                   disabled={isPending}
-                  className={`h-3 w-3 rounded-full transition ${status.className} ${
+                  className={`h-3 w-3 rounded-full transition-all duration-200 ${status.className} ${
                     active
-                      ? "ring-2 ring-offset-1 ring-[var(--accent)]"
-                      : "opacity-60 hover:opacity-100"
+                      ? "ring-2 ring-emerald-400 ring-offset-1 ring-offset-white scale-110"
+                      : "opacity-50 hover:opacity-100 hover:scale-110"
                   } disabled:cursor-wait`}
                 />
               );

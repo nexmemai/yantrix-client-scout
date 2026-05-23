@@ -52,6 +52,7 @@ async def discover_businesses(
     job: DiscoveryJob | None = None,
     depth: int = 1,
     max_results: int = 200,
+    search_phrase: str | None = None,
 ) -> list[uuid.UUID]:
     """
     Run the Google Maps discovery pipeline for `niche` in `city`.
@@ -63,16 +64,21 @@ async def discover_businesses(
       4. Skip duplicates (by website_url OR phone).
       5. Bulk-insert new businesses.
 
-    :param niche:       Niche label, e.g. "dental", "salon", "real_estate".
-    :param city:        City name, e.g. "Pune", "Mumbai".
-    :param db:          Async SQLAlchemy session (injected by caller).
-    :param job:         Optional DiscoveryJob ORM row to update progress.
-    :param depth:       gosom depth (1 page ≈ 20 results; depth 5 ≈ 100).
-    :param max_results: Cap total results to protect RAM on AWS t3.micro (1GB).
+    :param niche:        Canonical niche key, e.g. "dental", "ev_charging".
+                         Stored on each Business row for analytics/scoring.
+    :param city:         City name, e.g. "Pune", "Mumbai".
+    :param db:           Async SQLAlchemy session (injected by caller).
+    :param job:          Optional DiscoveryJob ORM row to update progress.
+    :param depth:        gosom depth (1 page ≈ 20 results; depth 5 ≈ 100).
+    :param max_results:  Cap total results to protect RAM on Oracle A1.
+    :param search_phrase: Resolved natural-language phrase ready for gosom,
+                         e.g. "EV charging stations". When None we fall back
+                         to the legacy built-in mapping for the 15 catalog
+                         niches so older callers keep working unchanged.
 
     :returns: List of newly inserted business UUIDs (duplicates excluded).
     """
-    query = _build_query(niche, city)
+    query = _build_query(search_phrase, niche, city)
     logger.info("[DISCOVERY] starting: query=%r niche=%r city=%r", query, niche, city)
 
     client = GmapsScraperClient()
@@ -137,28 +143,36 @@ async def ingest_raw_businesses(
 # ---------------------------------------------------------------------------
 
 
-def _build_query(niche: str, city: str) -> str:
+def _build_query(search_phrase: str | None, niche: str, city: str) -> str:
     """
-    Build a natural-language search query for gosom.
+    Compose the Google Maps search string from a resolved phrase.
 
-    Examples:
-      ("dental", "Pune")  →  "dental clinics in Pune"
-      ("salon", "Mumbai") →  "salons in Mumbai"
+    The full free-text resolution lives in app/services/niche_resolver.py;
+    this builder only handles the trailing " in <city>" composition so it
+    stays cheap and unit-testable.
+
+    Backwards compatibility: if the caller did not pass a `search_phrase`
+    (older internal callers, CSV ingestion, future tooling), we keep the
+    original built-in catalog so the legacy 15 niches keep producing the
+    exact same query strings they always did.
     """
-    niche_phrases: dict[str, str] = {
-        "dental": "dental clinics",
-        "salon": "beauty salons",
-        "real_estate": "real estate agents",
-        "clinic": "medical clinics",
-        "gym": "gyms and fitness centres",
-        "restaurant": "restaurants",
-        "hotel": "hotels",
-        "ca": "chartered accountants",
-        "lawyer": "law firms",
-        "physiotherapy": "physiotherapy clinics",
-    }
-    phrase = niche_phrases.get(niche.lower(), f"{niche.replace('_', ' ')}s")
-    return f"{phrase} in {city}"
+    if search_phrase:
+        phrase = search_phrase.strip()
+    else:
+        legacy: dict[str, str] = {
+            "dental": "dental clinics",
+            "salon": "beauty salons",
+            "real_estate": "real estate agents",
+            "clinic": "medical clinics",
+            "gym": "gyms and fitness centres",
+            "restaurant": "restaurants",
+            "hotel": "hotels",
+            "ca": "chartered accountants",
+            "lawyer": "law firms",
+            "physiotherapy": "physiotherapy clinics",
+        }
+        phrase = legacy.get(niche.lower(), f"{niche.replace('_', ' ')}s")
+    return f"{phrase} in {city.strip()}"
 
 
 async def _upsert_businesses(

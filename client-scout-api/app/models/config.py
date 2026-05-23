@@ -36,6 +36,11 @@ class NicheConfig(Base):
         ARRAY(String), nullable=False, default=list, server_default="{}"
     )
 
+    # Per-niche pitch tone. NULL means "use the system default tone"
+    # (DEFAULT_TONE in pitch_generator). Allowed values are constrained at the
+    # DB level by chk_niche_configs_pitch_tone (see migration 007).
+    pitch_tone: Mapped[str | None] = mapped_column(String(20))
+
     # Scoring weights
     weight_website: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=20)
     weight_mobile: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=15)
@@ -64,6 +69,11 @@ class NicheConfig(Base):
         CheckConstraint("weight_booking BETWEEN 0 AND 100", name="chk_w_booking"),
         CheckConstraint("weight_social BETWEEN 0 AND 100", name="chk_w_social"),
         CheckConstraint("weight_seo BETWEEN 0 AND 100", name="chk_w_seo"),
+        CheckConstraint(
+            "pitch_tone IS NULL OR pitch_tone IN "
+            "('professional', 'friendly', 'urgent', 'consultative')",
+            name="chk_niche_configs_pitch_tone",
+        ),
     )
 
     def __repr__(self) -> str:

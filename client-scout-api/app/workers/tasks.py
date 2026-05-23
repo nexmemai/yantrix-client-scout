@@ -137,6 +137,7 @@ async def run_discovery_task(
     city: str,
     depth: int,
     max_businesses: int,
+    search_phrase: str | None = None,
     auto_audit: bool = True,
     auto_score: bool = True,
     auto_pitch: bool = True,
@@ -149,6 +150,10 @@ async def run_discovery_task(
     stays inside this task on purpose so we cut over without changing
     semantics; future PRs can fan out per-lead audit work via
     `enqueue_job("run_audit_task", ...)` once we have a completion watcher.
+
+    `search_phrase` is the natural-language query produced by the niche
+    resolver; when omitted (older callers, manual enqueues) discover_businesses
+    falls back to its built-in catalog so the legacy 15 niches stay correct.
     """
     job_uuid = uuid.UUID(job_id)
     settings = get_settings()
@@ -218,6 +223,7 @@ async def run_discovery_task(
                     job=job,
                     depth=depth,
                     max_results=max_businesses,
+                    search_phrase=search_phrase,
                 )
                 summary["discovered"] = len(business_ids)
                 if job is not None:

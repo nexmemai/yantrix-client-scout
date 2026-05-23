@@ -1,4 +1,5 @@
 import {
+  BoardCard,
   LeadDetail,
   LeadSummary,
   LeadSalesState,
@@ -7,6 +8,7 @@ import {
   NicheConfig,
   PaginatedJobs,
   PaginatedLeads,
+  PipelineBoard,
   PitchResponse,
   RunScoutPayload,
   RunScoutResponse,
@@ -88,6 +90,12 @@ async function request<T>(
 export const apiClient = {
   listLeads(session: ApiSession, query?: RequestInitExtra["query"]) {
     return request<PaginatedLeads>(session, "/api/v1/leads", { method: "GET", query });
+  },
+  getBoard(session: ApiSession, columnLimit = 50) {
+    return request<PipelineBoard>(session, "/api/v1/leads/board", {
+      method: "GET",
+      query: { column_limit: columnLimit },
+    });
   },
   getLeadSummary(session: ApiSession) {
     return request<LeadSummary>(session, "/api/v1/leads/summary", { method: "GET" });

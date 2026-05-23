@@ -1,12 +1,55 @@
 # Yantrix Client Scout production stack for one VM.
 #
-# The default stack runs API, dashboard, gmaps-scraper, and local Postgres.
-# Optional services:
+# The default stack runs API, dashboard, gmaps-scraper, redis, worker, and
+# local Postgres. Optional services:
 #   COMPOSE_PROFILES=n8n docker compose up -d
 #   COMPOSE_PROFILES=scrapy docker compose up -d
 #   COMPOSE_PROFILES=n8n,scrapy docker compose up -d
+#
+# Scale workers horizontally:
+#   docker compose up -d --scale worker=3
 
 name: ${COMPOSE_PROJECT_NAME:-yantrix-client-scout}
+
+x-api-environment: &api-environment
+  APP_NAME: ${APP_NAME:-Yantrix Client Scout API}
+  APP_VERSION: ${APP_VERSION:-0.1.0}
+  DEBUG: ${DEBUG:-false}
+  API_HOST: 0.0.0.0
+  API_PORT: 8000
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  DB_HOST: ${DB_HOST:-db}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_NAME: ${DB_NAME:-clientscout}
+  DB_USER: ${DB_USER:-scout}
+  DB_PASSWORD: ${DB_PASSWORD:-changeme}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  GMAPS_SCRAPER_URL: http://gmaps-scraper:8080
+  LLM_PROVIDER: ${LLM_PROVIDER:-nvidia}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+  LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+  NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
+  NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+  NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-meta/llama-3.3-70b-instruct}
+  PSI_API_KEY: ${PSI_API_KEY:-}
+  HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+  ZOHO_CLIENT_ID: ${ZOHO_CLIENT_ID:-}
+  ZOHO_CLIENT_SECRET: ${ZOHO_CLIENT_SECRET:-}
+  ZOHO_REFRESH_TOKEN: ${ZOHO_REFRESH_TOKEN:-}
+  AUDIT_CONCURRENCY: ${AUDIT_CONCURRENCY:-3}
+  SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
+  WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-8}
+  WORKER_JOB_TIMEOUT_SECONDS: ${WORKER_JOB_TIMEOUT_SECONDS:-1800}
+  WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-15}
+  WORKER_STALE_JOB_THRESHOLD_SECONDS: ${WORKER_STALE_JOB_THRESHOLD_SECONDS:-300}
+  SNAPSHOT_BACKEND: ${SNAPSHOT_BACKEND:-local}
+  SNAPSHOT_DIR: /app/snapshots
+  JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
+  PLAYWRIGHT_BROWSERS_PATH: /home/scout/.cache/ms-playwright
 
 services:
   api:
@@ -19,41 +62,11 @@ services:
     env_file:
       - ./.env
     environment:
-      APP_NAME: ${APP_NAME:-Yantrix Client Scout API}
-      APP_VERSION: ${APP_VERSION:-0.1.0}
-      DEBUG: ${DEBUG:-false}
-      API_HOST: 0.0.0.0
-      API_PORT: 8000
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME:-clientscout}
-      DB_USER: ${DB_USER:-scout}
-      DB_PASSWORD: ${DB_PASSWORD:-changeme}
-      GMAPS_SCRAPER_URL: http://gmaps-scraper:8080
-      LLM_PROVIDER: ${LLM_PROVIDER:-nvidia}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
-      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
-      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
-      NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
-      NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
-      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-meta/llama-3.3-70b-instruct}
-      PSI_API_KEY: ${PSI_API_KEY:-}
-      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
-      ZOHO_CLIENT_ID: ${ZOHO_CLIENT_ID:-}
-      ZOHO_CLIENT_SECRET: ${ZOHO_CLIENT_SECRET:-}
-      ZOHO_REFRESH_TOKEN: ${ZOHO_REFRESH_TOKEN:-}
-      AUDIT_CONCURRENCY: ${AUDIT_CONCURRENCY:-3}
-      SCRAPER_CONCURRENCY: ${SCRAPER_CONCURRENCY:-2}
-      SNAPSHOT_BACKEND: ${SNAPSHOT_BACKEND:-local}
-      SNAPSHOT_DIR: /app/snapshots
-      JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
-      PLAYWRIGHT_BROWSERS_PATH: /home/scout/.cache/ms-playwright
+      <<: *api-environment
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       gmaps-scraper:
         condition: service_started
@@ -67,6 +80,72 @@ services:
       timeout: 10s
       retries: 3
       start_period: 45s
+    networks:
+      - scout
+
+  worker:
+    build:
+      context: ./client-scout-api
+      dockerfile: Dockerfile
+    image: ${API_IMAGE:-yantrix/client-scout-api:local}
+    # No container_name: workers may scale > 1 replica, which forbids static names.
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      <<: *api-environment
+      # Marks this process as a worker so app code can branch on role if needed.
+      SERVICE_ROLE: worker
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gmaps-scraper:
+        condition: service_started
+    volumes:
+      - api_snapshots:/app/snapshots
+    # ARQ replaces the API entrypoint. Override docker-entrypoint.sh's CMD.
+    entrypoint: ["arq"]
+    command: ["app.workers.arq_worker.WorkerSettings"]
+    healthcheck:
+      # ARQ writes a health key into Redis at health_check_interval. Reading it
+      # tells us the worker is alive without needing an HTTP port.
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import os, redis, sys; r=redis.Redis.from_url(os.environ['REDIS_URL']); k=r.keys('arq:health-check*'); sys.exit(0 if k else 1)\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - scout
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: ${REDIS_CONTAINER_NAME:-clientscout-redis}
+    restart: unless-stopped
+    # AOF for durability of queued jobs across restarts; bounded memory so a
+    # runaway producer cannot OOM the host. noeviction protects unprocessed
+    # jobs from being silently dropped under pressure.
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "${REDIS_MAXMEMORY:-256mb}"
+      - "--maxmemory-policy"
+      - "noeviction"
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_HOST_PORT:-127.0.0.1:6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     networks:
       - scout
 
@@ -194,4 +273,6 @@ volumes:
   n8n_data:
     driver: local
   pgdata:
+    driver: local
+  redis_data:
     driver: local

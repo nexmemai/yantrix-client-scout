@@ -1,16 +1,23 @@
 """
 api/run_scout.py - POST /run-scout.
 
-Runs the full scout pipeline for a niche + city and returns a final summary:
-discover -> audit -> score -> pitch.
+Returns a job_id immediately and enqueues the heavy pipeline (discovery +
+audit + score + pitch) onto the ARQ worker queue. The legacy in-process
+BackgroundTasks path has been removed: a worker container restart no longer
+loses jobs, and heavy pipelines no longer share an event loop with the API.
+
+Real-time progress is delivered to the dashboard over SSE at:
+    GET /api/v1/jobs/{job_id}/events
 """
 
-import asyncio
+from __future__ import annotations
+
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from arq.connections import ArqRedis
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,27 +25,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.job import DiscoveryJob
-from app.services.audit_worker import audit_failure_reason, run_audit_for_business
-from app.services.discovery import discover_businesses
-from app.services.pitch_generator import generate_and_save_pitch
-from app.services.scoring import HIGH_FIT_BUCKET, MID_FIT_BUCKET, score_business
+from app.workers.queue import get_arq_pool, publish_job_event
 
 router = APIRouter(prefix="/run-scout", tags=["Scout"])
 logger = logging.getLogger(__name__)
 
 PIPELINE_BATCH_CAP = 100
-PITCHABLE_BUCKETS = {HIGH_FIT_BUCKET, MID_FIT_BUCKET}
 
-_PIPELINE_SEM: asyncio.Semaphore | None = None
-
-
-def _get_pipeline_sem() -> asyncio.Semaphore:
-    global _PIPELINE_SEM
-    if _PIPELINE_SEM is None:
-        _PIPELINE_SEM = asyncio.Semaphore(5)
-    return _PIPELINE_SEM
-
-
+# Kept here for now - moving to a DB-backed niche resolver is tracked as a
+# separate story. Removing the validator wholesale would silently broaden the
+# API contract before the worker pipeline knows what to do with new niches.
 VALID_NICHES = {
     "dental",
     "salon",
@@ -98,23 +94,14 @@ class RunScoutRequest(BaseModel):
         return tone
 
 
-class BusinessPipelineResult(BaseModel):
-    business_id: uuid.UUID
-    audited: bool = False
-    scored: bool = False
-    pitched: bool = False
-    skipped_no_website: bool = False
-    failed_dns: bool = False
-    failed_audit_other: bool = False
-    failed: bool = False
-    failure_stage: str | None = None
-    failure_reason: str | None = None
-    fit_bucket: str | None = None
-    total_score: int | None = None
-    error_message: str | None = None
-
-
 class PipelineSummary(BaseModel):
+    """API response after enqueueing - the heavy work runs on the worker.
+
+    Counters stay zero in this response on purpose: the dashboard streams the
+    real numbers live via the /jobs/{id}/events SSE feed and falls back to
+    polling /jobs/{id} if SSE is unavailable.
+    """
+
     job_id: str
     status: str
     niche: str
@@ -141,15 +128,22 @@ class PipelineSummary(BaseModel):
 @router.post(
     "",
     response_model=PipelineSummary,
-    status_code=status.HTTP_200_OK,
-    summary="Run full discovery, audit, score, and pitch pipeline",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Enqueue full discovery, audit, score, and pitch pipeline",
 )
 async def run_scout(
     payload: RunScoutRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    arq: ArqRedis = Depends(get_arq_pool),
 ) -> PipelineSummary:
+    """Validate, persist a queued DiscoveryJob row, and enqueue the worker task.
+
+    Hot path: this returns in single-digit ms when Redis is healthy. The
+    dashboard immediately opens an SSE stream and starts rendering events.
+    """
     started_at = datetime.now(tz=timezone.utc)
+    settings = get_settings()
+
     if payload.max_businesses > PIPELINE_BATCH_CAP:
         logger.warning(
             "run-scout rejected max_businesses limit niche=%s city=%s requested=%d",
@@ -162,7 +156,6 @@ async def run_scout(
             detail=f"max_businesses must be <= {PIPELINE_BATCH_CAP}.",
         )
 
-    settings = get_settings()
     await _enforce_hourly_run_limit(
         payload.niche,
         payload.city,
@@ -170,14 +163,17 @@ async def run_scout(
         settings.RUN_SCOUT_HOURLY_LIMIT,
         db,
     )
+
+    # Status begins as "queued"; the worker flips it to "running" on pickup.
+    # This distinction lets the dashboard show "waiting for a worker" if
+    # every replica is busy.
     job = DiscoveryJob(
         id=uuid.uuid4(),
         query=f"{payload.niche} in {payload.city}",
         city=payload.city,
         niche=payload.niche,
         source="google_maps",
-        status="running",
-        started_at=started_at,
+        status="queued",
         created_at=started_at,
         updated_at=started_at,
     )
@@ -186,7 +182,7 @@ async def run_scout(
     await db.refresh(job)
 
     logger.info(
-        "[Job %s] [PIPELINE] started niche=%s city=%s depth=%d max_businesses=%d",
+        "[Job %s] [PIPELINE] enqueued niche=%s city=%s depth=%d max_businesses=%d",
         job.id,
         payload.niche,
         payload.city,
@@ -194,274 +190,56 @@ async def run_scout(
         payload.max_businesses,
     )
 
-    summary = PipelineSummary(
+    # Idempotency: ARQ deduplicates identical _job_ids, so a retried client
+    # request (or accidental double-submit) cannot trigger two pipeline runs
+    # for the same DB job row.
+    enqueue_job_id = f"discovery:{job.id}"
+    enqueued = await arq.enqueue_job(
+        "run_discovery_task",
         job_id=str(job.id),
-        status="running",
+        niche=payload.niche,
+        city=payload.city,
+        depth=payload.depth,
+        max_businesses=payload.max_businesses,
+        auto_audit=payload.auto_audit,
+        auto_score=payload.auto_score,
+        auto_pitch=payload.auto_pitch,
+        pitch_tone=payload.pitch_tone,
+        _job_id=enqueue_job_id,
+    )
+    if enqueued is None:
+        # ARQ returns None when a job with the same _job_id is already queued.
+        # We still publish "job_queued" so the dashboard renders state, and
+        # the existing worker run will drive completion.
+        logger.info("[Job %s] enqueue dedup hit (_job_id=%s)", job.id, enqueue_job_id)
+
+    # Seed the SSE state cache so a dashboard that connects in the gap
+    # between this response and the worker pickup sees "queued" immediately.
+    await publish_job_event(
+        arq,
+        job.id,
+        "job_queued",
+        stage="pipeline",
+        data={
+            "niche": payload.niche,
+            "city": payload.city,
+            "max_businesses": payload.max_businesses,
+        },
+    )
+
+    return PipelineSummary(
+        job_id=str(job.id),
+        status="queued",
         niche=payload.niche,
         city=payload.city,
         source=job.source,
         message=(
-            f"Scout job started for '{payload.niche}' in '{payload.city}'. "
-            "Poll /api/v1/jobs/{job_id} for progress."
+            f"Scout job queued for '{payload.niche}' in '{payload.city}'. "
+            "Subscribe to /api/v1/jobs/{job_id}/events for live progress."
         ),
         created_at=job.created_at.isoformat(),
         started_at=started_at.isoformat(),
     )
-
-    background_tasks.add_task(_run_scout_job, job.id, payload, started_at)
-    return summary
-
-
-async def _run_scout_job(
-    job_id: uuid.UUID,
-    payload: RunScoutRequest,
-    started_at: datetime,
-) -> None:
-    """Run the scout pipeline after the HTTP response returns."""
-    from app.database import AsyncSessionLocal
-
-    db = AsyncSessionLocal()
-    job = await db.get(DiscoveryJob, job_id)
-    if job is None:
-        await db.close()
-        logger.error("[Job %s] [PIPELINE] job row disappeared before processing", job_id)
-        return
-
-    summary = PipelineSummary(
-        job_id=str(job.id),
-        status="running",
-        niche=payload.niche,
-        city=payload.city,
-        source=job.source,
-        created_at=job.created_at.isoformat(),
-        started_at=started_at.isoformat(),
-    )
-
-    try:
-        # ── Stage 1: Discovery ────────────────────────────────────────
-        logger.info("[Job %s] [DISCOVERY] starting for %s in %s", job.id, payload.niche, payload.city)
-        business_ids = await discover_businesses(
-            niche=payload.niche,
-            city=payload.city,
-            db=db,
-            job=job,
-            depth=payload.depth,
-            max_results=payload.max_businesses,
-        )
-        summary.discovered = len(business_ids)
-        logger.info("[Job %s] [DISCOVERY] complete - %d new businesses found", job.id, len(business_ids))
-
-        # ── Zero-discovery: clean exit ────────────────────────────────
-        if not business_ids:
-            summary.status = "completed"
-            summary.message = (
-                f"Discovery returned 0 new businesses for '{payload.niche}' in "
-                f"'{payload.city}'. This can happen when the scraper finds no "
-                f"results or all discovered businesses already exist in the DB. "
-                f"Try increasing depth or using a different city."
-            )
-            logger.info("[Job %s] [DISCOVERY] zero results - completing job without errors", job.id)
-            _finalize_job(job, summary, started_at)
-            await db.commit()
-            await db.close()
-            return
-
-        # ── Stages 2-4: Audit → Score → Pitch ─────────────────────────
-        results = await _process_businesses(business_ids, payload)
-        _apply_results_to_summary(summary, results)
-
-        summary.status = "completed"
-        summary.message = (
-            f"Pipeline complete. {summary.discovered} discovered, "
-            f"{summary.audited} audited, {summary.scored} scored, "
-            f"{summary.pitched} pitched, {summary.high_fit_count} high-fit leads. "
-            f"Skipped no website: {summary.skipped_no_website}, "
-            f"DNS failures: {summary.failed_dns}, "
-            f"other audit failures: {summary.failed_audit_other}."
-        )
-        if summary.failed > 0:
-            summary.message += f" ({summary.failed} businesses had failures — see logs.)"
-
-        _finalize_job(job, summary, started_at)
-        await db.commit()
-
-        logger.info("[Job %s] [PIPELINE] completed: %s", job.id, summary.message)
-        await db.close()
-        return
-
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("[Job %s] [PIPELINE] fatal error: %s", job.id, exc)
-        summary.status = "failed"
-        summary.message = f"Pipeline error: {exc!s}"
-        _finalize_job(job, summary, started_at)
-        job.error_message = summary.message[:2000]
-        await db.commit()
-        await db.close()
-        return
-
-
-async def _process_businesses(
-    business_ids: list[uuid.UUID],
-    payload: RunScoutRequest,
-) -> list[BusinessPipelineResult]:
-    if not business_ids:
-        return []
-
-    tasks = [
-        _process_one_business(business_id=business_id, payload=payload)
-        for business_id in business_ids
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    normalized: list[BusinessPipelineResult] = []
-    for business_id, result in zip(business_ids, results, strict=False):
-        if isinstance(result, Exception):
-            logger.exception("[%s] unhandled business pipeline error", business_id, exc_info=result)
-            normalized.append(
-                BusinessPipelineResult(
-                    business_id=business_id,
-                    failed=True,
-                    failure_stage="PIPELINE",
-                    failure_reason="unhandled_exception",
-                    error_message=str(result),
-                )
-            )
-        else:
-            normalized.append(result)
-    return normalized
-
-
-async def _process_one_business(
-    business_id: uuid.UUID,
-    payload: RunScoutRequest,
-) -> BusinessPipelineResult:
-    from app.database import AsyncSessionLocal
-
-    async with _get_pipeline_sem():
-        async with AsyncSessionLocal() as db:
-            result = BusinessPipelineResult(business_id=business_id)
-            try:
-                # ── Audit ─────────────────────────────────────────────
-                audit = None
-                if payload.auto_audit:
-                    logger.info("[%s] [PIPELINE] business processing started", business_id)
-                    logger.info("[%s] [AUDIT] starting", business_id)
-                    audit = await run_audit_for_business(business_id, db)
-                    if audit is None:
-                        result.skipped_no_website = True
-                        result.failure_stage = "AUDIT"
-                        result.failure_reason = "no_website"
-                        result.error_message = "NO_WEBSITE: No website_url available for this business."
-                        logger.info("[%s] [AUDIT] skipped reason=no_website", business_id)
-                        return result
-                    audit_reason = audit_failure_reason(audit.error_message)
-                    if audit.status == "skipped" and audit_reason == "no_website":
-                        result.skipped_no_website = True
-                        result.failure_stage = "AUDIT"
-                        result.failure_reason = "no_website"
-                        result.error_message = audit.error_message
-                        logger.info("[%s] [AUDIT] skipped reason=no_website", business_id)
-                        return result
-                    if audit.status != "completed":
-                        result.failed = True
-                        result.failure_stage = "AUDIT"
-                        result.failure_reason = audit_reason or "audit_other"
-                        if result.failure_reason == "dns_resolution_failed":
-                            result.failed_dns = True
-                        else:
-                            result.failed_audit_other = True
-                        result.error_message = audit.error_message or f"Audit status: {audit.status}"
-                        logger.warning(
-                            "[%s] [AUDIT] failed reason=%s message=%s",
-                            business_id,
-                            result.failure_reason,
-                            result.error_message,
-                        )
-                        return result
-                    result.audited = True
-                    logger.info("[%s] [AUDIT] completed", business_id)
-
-                # ── Score ─────────────────────────────────────────────
-                score_outcome = None
-                if payload.auto_score and audit and audit.status == "completed":
-                    logger.info("[%s] [SCORE] starting", business_id)
-                    score_outcome = await score_business(business_id, db)
-                    if score_outcome is None:
-                        result.failed = True
-                        result.failure_stage = "SCORE"
-                        result.failure_reason = "score_no_result"
-                        result.error_message = "Scoring returned no result."
-                        logger.warning("[%s] [SCORE] failed: no result", business_id)
-                        return result
-                    result.scored = True
-                    result.fit_bucket = score_outcome.fit_bucket
-                    result.total_score = score_outcome.total_score
-                    logger.info(
-                        "[%s] [SCORE] completed total=%d bucket=%s",
-                        business_id,
-                        score_outcome.total_score,
-                        score_outcome.fit_bucket,
-                    )
-
-                # ── Pitch ─────────────────────────────────────────────
-                if (
-                    payload.auto_pitch
-                    and score_outcome
-                    and score_outcome.fit_bucket in PITCHABLE_BUCKETS
-                ):
-                    logger.info("[%s] [PITCH] generating for bucket=%s", business_id, score_outcome.fit_bucket)
-                    tone = "professional" if payload.pitch_tone == "auto" else payload.pitch_tone
-                    await generate_and_save_pitch(business_id=business_id, db=db, tone=tone)
-                    result.pitched = True
-                    logger.info("[%s] [PITCH] completed", business_id)
-
-                logger.info("[%s] [PIPELINE] business processing completed", business_id)
-                return result
-
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("[%s] [PIPELINE] business processing failed: %s", business_id, exc)
-                result.failed = True
-                result.failure_stage = result.failure_stage or "PIPELINE"
-                result.failure_reason = result.failure_reason or "unhandled_exception"
-                result.error_message = str(exc)
-                return result
-
-
-def _apply_results_to_summary(
-    summary: PipelineSummary,
-    results: list[BusinessPipelineResult],
-) -> None:
-    summary.audited = sum(1 for result in results if result.audited)
-    summary.scored = sum(1 for result in results if result.scored)
-    summary.pitched = sum(1 for result in results if result.pitched)
-    summary.skipped_no_website = sum(1 for result in results if result.skipped_no_website)
-    summary.failed_dns = sum(1 for result in results if result.failed_dns)
-    summary.failed_audit_other = sum(1 for result in results if result.failed_audit_other)
-    summary.failed = sum(1 for result in results if result.failed)
-    summary.high_fit_lead_ids = [
-        str(result.business_id)
-        for result in results
-        if result.fit_bucket == HIGH_FIT_BUCKET
-    ]
-    summary.high_fit_count = len(summary.high_fit_lead_ids)
-    summary.mid_fit_count = sum(1 for result in results if result.fit_bucket == MID_FIT_BUCKET)
-
-
-def _finalize_job(
-    job: DiscoveryJob,
-    summary: PipelineSummary,
-    started_at: datetime,
-) -> None:
-    completed_at = datetime.now(tz=timezone.utc)
-    summary.completed_at = completed_at.isoformat()
-    summary.duration_seconds = round((completed_at - started_at).total_seconds(), 1)
-
-    job.status = summary.status
-    job.total_discovered = summary.discovered
-    job.total_audited = summary.audited
-    job.total_scored = summary.scored
-    job.completed_at = completed_at
-    job.updated_at = completed_at
 
 
 async def _enforce_hourly_run_limit(

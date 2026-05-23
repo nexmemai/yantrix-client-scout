@@ -77,6 +77,15 @@ class RunScoutRequest(BaseModel):
     auto_audit: bool = Field(True, description="Run website audit for each business")
     auto_score: bool = Field(True, description="Run scoring after audit")
     auto_pitch: bool = Field(True, description="Generate pitches for high/mid-fit leads")
+    auto_send_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Phase 4 - Autonomous Outreach. When true, the worker emails and "
+            "WhatsApps each high/mid-fit lead using the LLM-generated pitch "
+            "without waiting for human review. Defaults to "
+            "OUTREACH_AUTOSEND_DEFAULT (false in production) when omitted."
+        ),
+    )
     pitch_tone: str = Field(
         "auto",
         description=(
@@ -202,6 +211,16 @@ async def run_scout(
         effective_tone = payload.pitch_tone
         tone_source = "request_override"
 
+    # Auto-send resolution: explicit request value wins; otherwise fall
+    # back to the operator-configurable system default. Default-false
+    # means an accidentally-replayed payload will never start mass
+    # mailing leads without an explicit opt-in.
+    effective_auto_send = (
+        payload.auto_send_enabled
+        if payload.auto_send_enabled is not None
+        else settings.OUTREACH_AUTOSEND_DEFAULT
+    )
+
     await _enforce_hourly_run_limit(
         resolved.key,
         payload.city,
@@ -228,7 +247,7 @@ async def run_scout(
     await db.refresh(job)
 
     logger.info(
-        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s",
+        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s auto_send=%s",
         job.id,
         payload.niche,
         resolved.key,
@@ -239,6 +258,7 @@ async def run_scout(
         resolved.source,
         effective_tone,
         tone_source,
+        effective_auto_send,
     )
 
     # Idempotency: ARQ deduplicates identical _job_ids, so a retried client
@@ -256,6 +276,7 @@ async def run_scout(
         auto_audit=payload.auto_audit,
         auto_score=payload.auto_score,
         auto_pitch=payload.auto_pitch,
+        auto_send_enabled=effective_auto_send,
         pitch_tone=effective_tone,
         _job_id=enqueue_job_id,
     )
@@ -281,6 +302,7 @@ async def run_scout(
             "resolution_source": resolved.source,
             "pitch_tone": effective_tone,
             "tone_source": tone_source,
+            "auto_send_enabled": effective_auto_send,
         },
     )
 

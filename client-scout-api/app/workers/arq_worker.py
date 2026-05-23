@@ -126,6 +126,7 @@ class WorkerSettings:
             tasks.run_audit_task,
             tasks.run_score_task,
             tasks.run_pitch_task,
+            tasks.run_send_outreach_task,
         ]
 
     @classmethod

@@ -52,6 +52,7 @@ STAGE_DISCOVERY = "discovery"
 STAGE_AUDIT = "audit"
 STAGE_SCORE = "score"
 STAGE_PITCH = "pitch"
+STAGE_OUTREACH = "outreach"
 STAGE_PIPELINE = "pipeline"
 
 JOB_STATUS_RUNNING = "running"
@@ -141,6 +142,7 @@ async def run_discovery_task(
     auto_audit: bool = True,
     auto_score: bool = True,
     auto_pitch: bool = True,
+    auto_send_enabled: bool = False,
     pitch_tone: str = "professional",
 ) -> dict[str, Any]:
     """Run the full scout pipeline for one DiscoveryJob.
@@ -280,6 +282,34 @@ async def run_discovery_task(
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             _apply_results(summary, results, business_ids)
+
+            # ── Stage 5: Autonomous outreach (fan-out, opt-in) ─────
+            # Enqueue a send task per pitched lead instead of running
+            # inline so a slow SMTP/WhatsApp call cannot stall the
+            # pipeline summary or break heartbeating. The send tasks
+            # share the same Redis pool / worker pod and report their
+            # own progress events.
+            if auto_send_enabled and redis is not None:
+                pitched_ids = _pitched_lead_ids(results)
+                summary["queued_for_send"] = len(pitched_ids)
+                if pitched_ids:
+                    await publish_job_event(
+                        redis,
+                        job_uuid,
+                        "stage_started",
+                        stage=STAGE_OUTREACH,
+                        data={"queued": len(pitched_ids)},
+                    )
+                    for lead_id in pitched_ids:
+                        # Per-lead dedup id keeps repeated pipeline retries
+                        # from sending the same prospect twice.
+                        send_job_id = f"send-outreach:{job_uuid}:{lead_id}"
+                        await redis.enqueue_job(
+                            "run_send_outreach_task",
+                            business_id=lead_id,
+                            job_id=str(job_uuid),
+                            _job_id=send_job_id,
+                        )
 
             await _finalise_job(
                 job_uuid,
@@ -424,6 +454,65 @@ async def run_pitch_task(
     return {"ok": ok, "business_id": business_id, "error": err}
 
 
+async def run_send_outreach_task(
+    ctx: dict[str, Any],
+    business_id: str,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    """Send autonomous outreach for one lead and publish the outcome.
+
+    This is fan-out work: ``run_discovery_task`` enqueues one of these per
+    pitched lead when ``auto_send_enabled=True``. Keeping it in its own
+    task means:
+
+      * a slow SMTP / Cloud API call cannot block the pipeline summary,
+      * each send retries independently under ARQ's retry policy,
+      * the orphan reaper still works (heartbeats live on the parent
+        DiscoveryJob, not on the send task).
+
+    The orchestrator (``services.outreach_service.send_outreach_for_lead``)
+    handles persistence into outreach_attempts and the denormalised
+    summary columns; this wrapper only marshals ids and surfaces an SSE
+    event so the dashboard can update the Communication Log live.
+    """
+    from app.services.outreach_service import send_outreach_for_lead
+
+    business_uuid = uuid.UUID(business_id)
+    job_uuid = uuid.UUID(job_id) if job_id else None
+    redis = ctx.get("redis")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            outcome = await send_outreach_for_lead(
+                business_id=business_uuid,
+                db=db,
+                job_id=job_uuid,
+            )
+        ok = outcome.lead_status in {"sent", "partial"}
+        err = outcome.error_message
+    except Exception as exc:  # noqa: BLE001 - surface but never poison the queue
+        logger.exception(
+            "[%s] [OUTREACH] send task failed: %s", business_uuid, exc
+        )
+        ok = False
+        err = str(exc)[:500]
+
+    if redis is not None and job_id is not None:
+        await publish_job_event(
+            redis,
+            job_id,
+            "stage_progress",
+            stage=STAGE_OUTREACH,
+            data={
+                "business_id": business_id,
+                "ok": ok,
+                "error": err,
+            },
+        )
+
+    return {"ok": ok, "business_id": business_id, "error": err}
+
+
 # ---------------------------------------------------------------------------
 # Cron: orphan reaper
 # ---------------------------------------------------------------------------
@@ -523,7 +612,27 @@ def _empty_summary() -> dict[str, Any]:
         "high_fit_count": 0,
         "mid_fit_count": 0,
         "high_fit_lead_ids": [],
+        # Phase 4: how many leads were enqueued for autonomous send.
+        # Always present so the dashboard summary can render a "0 sent"
+        # cell when auto_send_enabled was false.
+        "queued_for_send": 0,
     }
+
+
+def _pitched_lead_ids(results: list[Any]) -> list[str]:
+    """Pull the business ids that received a pitch in this run.
+
+    Used to fan out send tasks. Errors and skipped leads are excluded so
+    auto-send only targets the high/mid-fit leads that produced copy -
+    matching the configured `pitchable_buckets` set above.
+    """
+    ids: list[str] = []
+    for outcome in results:
+        if isinstance(outcome, Exception):
+            continue
+        if outcome.get("pitched"):
+            ids.append(str(outcome["business_id"]))
+    return ids
 
 
 async def _process_one_business(

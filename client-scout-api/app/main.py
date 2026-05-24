@@ -110,6 +110,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("[STARTUP] %s v%s ready", settings.APP_NAME, settings.APP_VERSION)
     yield
     logger.info("[SHUTDOWN] %s cleaning up", settings.APP_NAME)
+    # Close ARQ pool + pub/sub Redis client created lazily by app.workers.queue.
+    # Done in the shutdown half of the lifespan so connections drain before
+    # uvicorn returns control to the orchestrator.
+    try:
+        from app.workers.queue import close_queue_clients
+
+        await close_queue_clients()
+    except Exception as exc:  # noqa: BLE001 - shutdown must succeed
+        logger.warning("[SHUTDOWN] queue client teardown failed: %s", exc)
 
 
 def create_app() -> FastAPI:

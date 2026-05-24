@@ -40,6 +40,13 @@ class DiscoveryJob(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # ── Worker liveness (added by migration 005) ─────────────────────
+    # Updated by the ARQ task on a fixed cadence so the orphan reaper can
+    # detect dead workers and mark stuck jobs as failed.
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_id: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # Relationships
     businesses = relationship("Business", back_populates="job")
 

@@ -6,6 +6,8 @@ import { Link } from "react-router-dom";
 import { apiClient, ApiSession } from "../api/client";
 import { LeadListItem } from "../lib/types";
 import { formatDate, scoreBucket, scoreBucketTone, withinDateRange } from "../lib/utils";
+import { useJobEvents } from "../hooks/useJobEvents";
+import { useToast } from "../components/Toast";
 
 interface LeadsPageProps {
   session: ApiSession;
@@ -13,6 +15,7 @@ interface LeadsPageProps {
 
 export function LeadsPage({ session }: LeadsPageProps) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [city, setCity] = useState("");
   const [niche, setNiche] = useState("");
   const [bucket, setBucket] = useState<"" | "high-fit" | "mid-fit" | "low-fit">("");
@@ -45,26 +48,56 @@ export function LeadsPage({ session }: LeadsPageProps) {
     onSuccess: (response) => {
       setActiveJobId(response.job_id);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast.info("Scout queued", `Job ${response.job_id.slice(0, 8)}… is in the queue.`);
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        "Scout failed to start",
+        error instanceof Error ? error.message : "Unknown error",
+      );
     },
   });
 
-  const jobStatusQuery = useQuery({
-    queryKey: ["jobs", activeJobId],
-    queryFn: () => apiClient.getJob(session, activeJobId as string),
-    enabled: Boolean(activeJobId),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return data?.status === "completed" || data?.status === "failed" ? false : 4000;
+  // SSE-first job tracking; falls back to polling automatically when the
+  // EventSource transport is unavailable or repeatedly fails.
+  const {
+    job: jobEventsJob,
+    transport,
+  } = useJobEvents({
+    session,
+    jobId: activeJobId,
+    onJobCompleted: (event) => {
+      const data = event.data as Record<string, number | undefined>;
+      const discovered = data.discovered ?? 0;
+      const audited = data.audited ?? 0;
+      const pitched = data.pitched ?? 0;
+      toast.success(
+        "Scout completed",
+        `${discovered} discovered • ${audited} audited • ${pitched} pitched`,
+      );
+      // The hook already invalidates leads/jobs; this is just for UI parity
+      // with the previous polling behaviour in case any local cache needs it.
+      queryClient.invalidateQueries({ queryKey: ["leads", "summary"] });
+    },
+    onJobFailed: (event) => {
+      const data = event.data as { error?: string; reaper?: boolean };
+      const reason = data.reaper
+        ? "The worker process died before completion. The reaper marked it failed."
+        : data.error ?? "Pipeline error.";
+      toast.error("Scout failed", reason);
     },
   });
 
+  // One-off toast when the SSE transport degrades to polling so operators
+  // know why their progress feed slowed down.
   useEffect(() => {
-    const status = jobStatusQuery.data?.status;
-    if (status === "completed") {
-      queryClient.invalidateQueries({ queryKey: ["leads"] });
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    if (transport === "polling") {
+      toast.warning(
+        "Live updates degraded",
+        "Real-time event stream is unavailable. Falling back to polling every 4s.",
+      );
     }
-  }, [jobStatusQuery.data?.status, queryClient]);
+  }, [transport, toast]);
 
   const items = leadsQuery.data?.items ?? [];
   const niches = useMemo(
@@ -155,8 +188,12 @@ export function LeadsPage({ session }: LeadsPageProps) {
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const job = jobStatusQuery.data;
-  const jobRunning = runScoutMutation.isPending || job?.status === "running" || job?.status === "pending";
+  const job = jobEventsJob;
+  const jobRunning =
+    runScoutMutation.isPending ||
+    job?.status === "running" ||
+    job?.status === "queued" ||
+    job?.status === "pending";
   const jobProgressText = job
     ? `${job.total_scored || job.total_audited || job.total_discovered} / ${Math.max(job.total_discovered, maxBusinesses)} leads processed`
     : "No active scout job";
@@ -230,9 +267,6 @@ export function LeadsPage({ session }: LeadsPageProps) {
             ) : null}
             {runScoutMutation.isError ? (
               <div className="mt-2 text-sm text-[var(--danger)]">{(runScoutMutation.error as Error).message}</div>
-            ) : null}
-            {jobStatusQuery.isError ? (
-              <div className="mt-2 text-sm text-[var(--danger)]">{(jobStatusQuery.error as Error).message}</div>
             ) : null}
           </div>
         </form>

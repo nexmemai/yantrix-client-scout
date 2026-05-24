@@ -82,6 +82,22 @@ class Settings(BaseSettings):
     LEAD_WEBHOOK_DEFAULT_URL: str = ""
     RUN_SCOUT_HOURLY_LIMIT: int = 10
 
+    # ── Redis / ARQ queue ────────────────────────────────────────────
+    REDIS_URL: str = "redis://redis:6379/0"
+    # Maximum jobs a single ARQ worker process executes concurrently.
+    # On Oracle A1 (4 OCPU, 24 GB) 8 is a safe default; raise it if you have
+    # CPU headroom and Playwright RSS is bounded.
+    WORKER_MAX_JOBS: int = 8
+    # Hard ceiling per task. Discovery + audit + score + pitch in one go on a
+    # 100-lead batch typically finishes in 15-25 minutes; 30 minutes leaves
+    # headroom for transient slowness without orphaning the entire run.
+    WORKER_JOB_TIMEOUT_SECONDS: int = 30 * 60
+    # How often a running task writes `last_heartbeat = now()` on its job row.
+    WORKER_HEARTBEAT_INTERVAL_SECONDS: int = 15
+    # Reaper threshold. Any DiscoveryJob in `running` state whose heartbeat is
+    # older than this is presumed dead and flipped to `failed`.
+    WORKER_STALE_JOB_THRESHOLD_SECONDS: int = 5 * 60
+
     # ── Worker concurrency ────────────────────────────────────────────
     AUDIT_CONCURRENCY: int = 5   # max parallel Playwright browsers
     SCRAPER_CONCURRENCY: int = 2  # max parallel JustDial crawlers

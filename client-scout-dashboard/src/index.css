@@ -197,6 +197,35 @@ textarea {
   box-shadow: var(--shadow-sm);
 }
 
+/* Premium "floating" card. Same visual contract as .surface-strong but
+   with a deeper resting shadow so detail pages with many cards still
+   feel layered, and a small lift on hover for any that are interactive
+   (links, drag handles, etc.). The shadow upgrade goes from sm -> md
+   so the depth is noticeable but never distracting. */
+.card {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.card-interactive:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Standard section heading used at the top of every card. Keeps tracking,
+   weight and colour identical app-wide so the eye doesn't have to recalibrate
+   between sections. */
+.card-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* Floating glass panel - command palette, dropdowns, large modals.
    Heavier backdrop blur + the lg shadow so it visibly detaches from
    whatever's behind it. */

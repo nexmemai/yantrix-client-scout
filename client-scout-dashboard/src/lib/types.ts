@@ -117,11 +117,34 @@ export interface LeadDetail {
 }
 
 export interface PaginatedLeads {
-  total: number;
+  total: number | null;
   page: number;
   limit: number;
-  pages: number;
+  pages: number | null;
   items: LeadListItem[];
+  next_cursor?: string | null;
+  has_more?: boolean;
+}
+
+export interface BoardCard extends LeadListItem {
+  pain_flags?: Record<string, boolean> | null;
+  pain_count?: number;
+  last_contacted_at?: string | null;
+}
+
+export interface BoardWindow {
+  today_start: string;
+  stale_cutoff: string;
+  won_cutoff: string;
+}
+
+export interface PipelineBoard {
+  hot: BoardCard[];
+  follow_ups: BoardCard[];
+  stale: BoardCard[];
+  won: BoardCard[];
+  generated_at: string;
+  window: BoardWindow;
 }
 
 export interface LeadSalesUpdate {

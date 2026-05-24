@@ -1,12 +1,13 @@
 """
 models/config.py — ORM model for per-niche scoring configurations.
-Replaces scoring_configs. Synced with migrations/001_initial_schema.sql :: niche_configs.
+Replaces scoring_configs. Synced with migrations/001_initial_schema.sql :: niche_configs
+plus the additive columns from 006_dynamic_niches.sql.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, SmallInteger, String, Text, func
+from sqlalchemy import ARRAY, Boolean, CheckConstraint, DateTime, Index, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,7 +23,18 @@ class NicheConfig(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     niche: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    display_name: Mapped[str | None] = mapped_column(String(150))
+    display_name: Mapped[str | None] = mapped_column(Text)
+    # Search phrase fed verbatim to gosom by the niche resolver. NULL means
+    # "use the built-in catalog phrase or a generic plural".
+    search_phrase: Mapped[str | None] = mapped_column(Text)
+    # Soft-disable flag: rows with is_enabled=False are ignored by the resolver
+    # but kept for historical analytics.
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Free-text aliases. The resolver normalises a user query, then checks both
+    # the canonical key and any alias array element.
+    aliases: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list, server_default="{}"
+    )
 
     # Scoring weights
     weight_website: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=20)

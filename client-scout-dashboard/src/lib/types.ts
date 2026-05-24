@@ -116,12 +116,89 @@ export interface LeadDetail {
   score?: ScoreRead | null;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4 - Autonomous Outreach
+// ---------------------------------------------------------------------------
+
+/** Channels the worker can target. Mirrors the CHECK constraint on
+ *  outreach_attempts.channel. */
+export type OutreachChannel = "email" | "whatsapp" | "sms";
+
+/** Per-attempt status. Mirrors outreach_attempts.status. */
+export type OutreachAttemptStatus = "pending" | "sent" | "failed" | "skipped";
+
+/** Lead-level summary status. Mirrors businesses.outreach_status. */
+export type LeadOutreachStatus =
+  | "idle"
+  | "pending"
+  | "sent"
+  | "partial"
+  | "failed"
+  | "skipped";
+
+export interface OutreachAttempt {
+  id: string;
+  business_id: string;
+  pitch_id?: string | null;
+  job_id?: string | null;
+  channel: OutreachChannel;
+  status: OutreachAttemptStatus;
+  provider?: string | null;
+  provider_message_id?: string | null;
+  recipient?: string | null;
+  payload_subject?: string | null;
+  payload_body?: string | null;
+  error_message?: string | null;
+  is_dry_run: boolean;
+  attempted_at: string;
+  completed_at?: string | null;
+}
+
+export interface OutreachLeadSummary {
+  business_id: string;
+  outreach_status: LeadOutreachStatus;
+  email_sent_at?: string | null;
+  whatsapp_sent_at?: string | null;
+  last_outreach_at?: string | null;
+  last_outreach_error?: string | null;
+  has_email_channel: boolean;
+  has_whatsapp_channel: boolean;
+}
+
+export interface OutreachTimeline {
+  summary: OutreachLeadSummary;
+  attempts: OutreachAttempt[];
+}
+
 export interface PaginatedLeads {
-  total: number;
+  total: number | null;
   page: number;
   limit: number;
-  pages: number;
+  pages: number | null;
   items: LeadListItem[];
+  next_cursor?: string | null;
+  has_more?: boolean;
+}
+
+export interface BoardCard extends LeadListItem {
+  pain_flags?: Record<string, boolean> | null;
+  pain_count?: number;
+  last_contacted_at?: string | null;
+}
+
+export interface BoardWindow {
+  today_start: string;
+  stale_cutoff: string;
+  won_cutoff: string;
+}
+
+export interface PipelineBoard {
+  hot: BoardCard[];
+  follow_ups: BoardCard[];
+  stale: BoardCard[];
+  won: BoardCard[];
+  generated_at: string;
+  window: BoardWindow;
 }
 
 export interface LeadSalesUpdate {
@@ -155,6 +232,13 @@ export interface RunScoutPayload {
   niche: string;
   city: string;
   max_businesses: number;
+  /**
+   * Phase 4 - Autonomous Outreach. When true, the worker emails and
+   * WhatsApps high/mid-fit leads using the LLM-generated pitch without
+   * waiting for human review. Optional: omitted means "use the API's
+   * configured default", which is `false` in production.
+   */
+  auto_send_enabled?: boolean;
 }
 
 export interface RunScoutResponse {

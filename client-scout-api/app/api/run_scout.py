@@ -13,6 +13,7 @@ Real-time progress is delivered to the dashboard over SSE at:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.job import DiscoveryJob
+from app.services.niche_resolver import (
+    InvalidNicheError,
+    normalize_niche_key,
+    resolve_niche,
+)
 from app.workers.queue import get_arq_pool, publish_job_event
 
 router = APIRouter(prefix="/run-scout", tags=["Scout"])
@@ -32,30 +38,35 @@ logger = logging.getLogger(__name__)
 
 PIPELINE_BATCH_CAP = 100
 
-# Kept here for now - moving to a DB-backed niche resolver is tracked as a
-# separate story. Removing the validator wholesale would silently broaden the
-# API contract before the worker pipeline knows what to do with new niches.
-VALID_NICHES = {
-    "dental",
-    "salon",
-    "real_estate",
-    "clinic",
-    "gym",
-    "restaurant",
-    "hotel",
-    "ca",
-    "lawyer",
-    "physiotherapy",
-    "optician",
-    "veterinary",
-    "pharmacy",
-    "spa",
-    "coaching",
-}
+# Free-text city validator. Accepts:
+#   - any Unicode letter (Café, São Paulo, Bengaluru),
+#   - spaces, hyphens, apostrophes (curly or straight), periods.
+# Rejects digits and other punctuation so a typo'd payload like "Pune; DROP"
+# fails validation before reaching the gosom client.
+CITY_PATTERN = re.compile(r"^[\w\s.\-'\u2019]{2,100}$", flags=re.UNICODE)
+# `\w` includes underscores under re.UNICODE which we don't want for cities.
+CITY_REJECT_PATTERN = re.compile(r"[\d_]", flags=re.UNICODE)
 
 
 class RunScoutRequest(BaseModel):
-    niche: str = Field(..., description="Business niche key, e.g. dental or salon")
+    """Free-text scout payload.
+
+    `niche` is intentionally NOT validated against an allow-list anymore. The
+    /run-scout handler runs `resolve_niche()` against the DB + built-in catalog
+    + generic fallback so users can target any industry the team adds to
+    niche_configs (or anything Google Maps recognises directly).
+    """
+
+    niche: str = Field(
+        ...,
+        min_length=2,
+        max_length=80,
+        description=(
+            "Free-text industry, e.g. 'dental', 'EV charging stations', "
+            "'corporate cafeterias'. Resolved server-side via "
+            "app.services.niche_resolver."
+        ),
+    )
     city: str = Field(..., min_length=2, max_length=100, description="City name")
     depth: int = Field(1, ge=1, le=5, description="gosom pagination depth")
     max_businesses: int = Field(
@@ -66,22 +77,48 @@ class RunScoutRequest(BaseModel):
     auto_audit: bool = Field(True, description="Run website audit for each business")
     auto_score: bool = Field(True, description="Run scoring after audit")
     auto_pitch: bool = Field(True, description="Generate pitches for high/mid-fit leads")
-    pitch_tone: str = Field("professional", description="Pitch tone metadata")
+    auto_send_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Phase 4 - Autonomous Outreach. When true, the worker emails and "
+            "WhatsApps each high/mid-fit lead using the LLM-generated pitch "
+            "without waiting for human review. Defaults to "
+            "OUTREACH_AUTOSEND_DEFAULT (false in production) when omitted."
+        ),
+    )
+    pitch_tone: str = Field(
+        "auto",
+        description=(
+            "Pitch tone override. The default 'auto' means 'use the tone "
+            "configured on the matched niche_config row, falling back to "
+            "the system default'. Pass an explicit value only when you want "
+            "to override the niche's configured tone for one run."
+        ),
+    )
 
     @field_validator("niche")
     @classmethod
     def validate_niche(cls, value: str) -> str:
-        niche = value.lower().strip()
-        if niche not in VALID_NICHES:
-            raise ValueError(f"Unknown niche '{niche}'. Valid niches: {sorted(VALID_NICHES)}")
-        return niche
+        # We only validate that the input CAN be normalised to a canonical
+        # key. The actual resolution (DB + catalog + generic) happens in the
+        # handler so we have a session.
+        try:
+            normalize_niche_key(value)
+        except InvalidNicheError as exc:
+            raise ValueError(str(exc)) from exc
+        return value.strip()
 
     @field_validator("city")
     @classmethod
     def validate_city(cls, value: str) -> str:
         city = value.strip()
-        if not city.replace(" ", "").isalpha():
-            raise ValueError("City must contain only letters and spaces.")
+        # Match-and-reject pair: regex modules cannot easily express
+        # "any letter except underscore" so we test in two passes.
+        if not CITY_PATTERN.match(city) or CITY_REJECT_PATTERN.search(city):
+            raise ValueError(
+                "City must be 2-100 characters of letters, spaces, hyphens, "
+                "apostrophes, or periods (no digits or underscores)."
+            )
         return city
 
     @field_validator("pitch_tone")
@@ -136,11 +173,7 @@ async def run_scout(
     db: AsyncSession = Depends(get_db),
     arq: ArqRedis = Depends(get_arq_pool),
 ) -> PipelineSummary:
-    """Validate, persist a queued DiscoveryJob row, and enqueue the worker task.
-
-    Hot path: this returns in single-digit ms when Redis is healthy. The
-    dashboard immediately opens an SSE stream and starts rendering events.
-    """
+    """Validate, resolve, persist, enqueue. Single-digit ms when Redis is healthy."""
     started_at = datetime.now(tz=timezone.utc)
     settings = get_settings()
 
@@ -156,8 +189,40 @@ async def run_scout(
             detail=f"max_businesses must be <= {PIPELINE_BATCH_CAP}.",
         )
 
+    # Free-text resolution: try DB first, then the built-in catalog, then a
+    # generic plural. Throws InvalidNicheError only when the input cannot be
+    # normalised (already filtered by the validator, but defensive).
+    try:
+        resolved = await resolve_niche(payload.niche, db)
+    except InvalidNicheError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    # Tone resolution:
+    #   * "auto" => use the niche's configured tone, else system default.
+    #   * any explicit value (professional|friendly|urgent|consultative)
+    #     wins over the niche default for this single run only.
+    if payload.pitch_tone == "auto":
+        effective_tone = resolved.tone or "auto"
+        tone_source = "niche_config" if resolved.tone else "system_default"
+    else:
+        effective_tone = payload.pitch_tone
+        tone_source = "request_override"
+
+    # Auto-send resolution: explicit request value wins; otherwise fall
+    # back to the operator-configurable system default. Default-false
+    # means an accidentally-replayed payload will never start mass
+    # mailing leads without an explicit opt-in.
+    effective_auto_send = (
+        payload.auto_send_enabled
+        if payload.auto_send_enabled is not None
+        else settings.OUTREACH_AUTOSEND_DEFAULT
+    )
+
     await _enforce_hourly_run_limit(
-        payload.niche,
+        resolved.key,
         payload.city,
         started_at,
         settings.RUN_SCOUT_HOURLY_LIMIT,
@@ -169,9 +234,9 @@ async def run_scout(
     # every replica is busy.
     job = DiscoveryJob(
         id=uuid.uuid4(),
-        query=f"{payload.niche} in {payload.city}",
+        query=f"{resolved.search_phrase} in {payload.city}",
         city=payload.city,
-        niche=payload.niche,
+        niche=resolved.key,
         source="google_maps",
         status="queued",
         created_at=started_at,
@@ -182,12 +247,19 @@ async def run_scout(
     await db.refresh(job)
 
     logger.info(
-        "[Job %s] [PIPELINE] enqueued niche=%s city=%s depth=%d max_businesses=%d",
+        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s auto_send=%s",
+        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s",
         job.id,
         payload.niche,
+        resolved.key,
+        resolved.search_phrase,
         payload.city,
         payload.depth,
         payload.max_businesses,
+        resolved.source,
+        effective_tone,
+        tone_source,
+        effective_auto_send,
     )
 
     # Idempotency: ARQ deduplicates identical _job_ids, so a retried client
@@ -197,14 +269,16 @@ async def run_scout(
     enqueued = await arq.enqueue_job(
         "run_discovery_task",
         job_id=str(job.id),
-        niche=payload.niche,
+        niche=resolved.key,
+        search_phrase=resolved.search_phrase,
         city=payload.city,
         depth=payload.depth,
         max_businesses=payload.max_businesses,
         auto_audit=payload.auto_audit,
         auto_score=payload.auto_score,
         auto_pitch=payload.auto_pitch,
-        pitch_tone=payload.pitch_tone,
+        auto_send_enabled=effective_auto_send,
+        pitch_tone=effective_tone,
         _job_id=enqueue_job_id,
     )
     if enqueued is None:
@@ -221,21 +295,28 @@ async def run_scout(
         "job_queued",
         stage="pipeline",
         data={
-            "niche": payload.niche,
+            "niche": resolved.key,
+            "niche_display": resolved.display,
+            "search_phrase": resolved.search_phrase,
             "city": payload.city,
             "max_businesses": payload.max_businesses,
+            "resolution_source": resolved.source,
+            "pitch_tone": effective_tone,
+            "tone_source": tone_source,
+            "auto_send_enabled": effective_auto_send,
         },
     )
 
     return PipelineSummary(
         job_id=str(job.id),
         status="queued",
-        niche=payload.niche,
+        niche=resolved.key,
         city=payload.city,
         source=job.source,
         message=(
-            f"Scout job queued for '{payload.niche}' in '{payload.city}'. "
-            "Subscribe to /api/v1/jobs/{job_id}/events for live progress."
+            f"Scout job queued for '{resolved.display}' in '{payload.city}' "
+            f"(resolved via {resolved.source}). Subscribe to "
+            f"/api/v1/jobs/{job.id}/events for live progress."
         ),
         created_at=job.created_at.isoformat(),
         started_at=started_at.isoformat(),

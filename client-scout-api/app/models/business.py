@@ -81,6 +81,17 @@ class Business(Base):
     priority_rank: Mapped[int | None] = mapped_column(Integer)
     assigned_to: Mapped[str | None] = mapped_column(Text)
 
+    # Phase 4 - Autonomous Outreach summary fields. The full per-attempt
+    # history lives in outreach_attempts; these columns are denormalised
+    # for fast list/Kanban rendering. Synced with migrations/008.
+    email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    whatsapp_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outreach_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="idle"
+    )
+    last_outreach_error: Mapped[str | None] = mapped_column(Text)
+    last_outreach_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -118,6 +129,10 @@ class Business(Base):
             "reliability IS NULL OR reliability IN ('low', 'medium', 'high')",
             name="chk_business_reliability",
         ),
+        CheckConstraint(
+            "outreach_status IN ('idle', 'pending', 'sent', 'partial', 'failed', 'skipped')",
+            name="chk_business_outreach_status",
+        ),
     )
 
     # Relationships
@@ -125,6 +140,12 @@ class Business(Base):
     audit = relationship("Audit", back_populates="business", uselist=False)
     score = relationship("Score", back_populates="business", uselist=False)
     pitches = relationship("Pitch", back_populates="business", order_by="Pitch.generated_at.desc()")
+    outreach_attempts = relationship(
+        "OutreachAttempt",
+        back_populates="business",
+        order_by="OutreachAttempt.attempted_at.desc()",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Business id={self.id} name={self.name!r} city={self.city!r}>"

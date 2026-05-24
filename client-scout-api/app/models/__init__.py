@@ -9,6 +9,7 @@ from app.models.audit import Audit             # noqa: F401
 from app.models.config import NicheConfig      # noqa: F401  (was ScoringConfig)
 from app.models.score import Score             # noqa: F401
 from app.models.pitch import Pitch             # noqa: F401
+from app.models.outreach import OutreachAttempt  # noqa: F401
 
 __all__ = [
     "DiscoveryJob",
@@ -17,4 +18,5 @@ __all__ = [
     "NicheConfig",
     "Score",
     "Pitch",
+    "OutreachAttempt",
 ]

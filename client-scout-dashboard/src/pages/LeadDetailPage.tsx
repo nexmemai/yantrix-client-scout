@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Copy, ExternalLink, MessageCircle, RefreshCw, Save } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { apiClient, ApiSession } from "../api/client";
+import { CommunicationLog } from "../components/CommunicationLog";
 import { SignalPill } from "../components/SignalPill";
 import { formatDate, scoreBucket, scoreBucketTone } from "../lib/utils";
 
@@ -201,6 +202,8 @@ export function LeadDetailPage({ session }: LeadDetailPageProps) {
         </div>
         <div className="mt-3 text-xs text-[var(--muted)]">Last contacted: {formatDate(lead.last_contacted_at)}</div>
       </section>
+
+      <CommunicationLog session={session} leadId={lead.id} />
 
       <section className="surface-strong p-5">
         <div className="text-sm font-bold uppercase text-[var(--muted)]">Audit signals</div>

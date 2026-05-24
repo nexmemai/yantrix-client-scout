@@ -1,12 +1,15 @@
 import {
+  BoardCard,
   LeadDetail,
   LeadSummary,
   LeadSalesState,
   LeadSalesUpdate,
   JobStatus,
   NicheConfig,
+  OutreachTimeline,
   PaginatedJobs,
   PaginatedLeads,
+  PipelineBoard,
   PitchResponse,
   RunScoutPayload,
   RunScoutResponse,
@@ -89,18 +92,35 @@ export const apiClient = {
   listLeads(session: ApiSession, query?: RequestInitExtra["query"]) {
     return request<PaginatedLeads>(session, "/api/v1/leads", { method: "GET", query });
   },
+  getBoard(session: ApiSession, columnLimit = 50) {
+    return request<PipelineBoard>(session, "/api/v1/leads/board", {
+      method: "GET",
+      query: { column_limit: columnLimit },
+    });
+  },
   getLeadSummary(session: ApiSession) {
     return request<LeadSummary>(session, "/api/v1/leads/summary", { method: "GET" });
   },
   runScout(session: ApiSession, payload: RunScoutPayload) {
+    // The pipeline always runs audit -> score -> pitch in this client; the
+    // dashboard never wants the half-pipeline modes the API supports. We
+    // forward auto_send_enabled only when the caller set it explicitly so
+    // omitting it falls through to the API's OUTREACH_AUTOSEND_DEFAULT
+    // (false in production).
+    const body: Record<string, unknown> = {
+      niche: payload.niche,
+      city: payload.city,
+      max_businesses: payload.max_businesses,
+      auto_audit: true,
+      auto_score: true,
+      auto_pitch: true,
+    };
+    if (typeof payload.auto_send_enabled === "boolean") {
+      body.auto_send_enabled = payload.auto_send_enabled;
+    }
     return request<RunScoutResponse>(session, "/api/v1/run-scout", {
       method: "POST",
-      body: JSON.stringify({
-        ...payload,
-        auto_audit: true,
-        auto_score: true,
-        auto_pitch: true,
-      }),
+      body: JSON.stringify(body),
     });
   },
   getJob(session: ApiSession, jobId: string) {
@@ -111,6 +131,17 @@ export const apiClient = {
   },
   getLead(session: ApiSession, leadId: string) {
     return request<LeadDetail>(session, `/api/v1/leads/${leadId}`, { method: "GET" });
+  },
+  getLeadOutreach(session: ApiSession, leadId: string) {
+    // Phase 4 timeline: summary + ordered attempts (newest first, capped
+    // at 50 by the API). The dashboard uses this for the Communication
+    // Log on the LeadDetailPage. Idempotent GET so safe to refetch under
+    // TanStack Query's polling.
+    return request<OutreachTimeline>(
+      session,
+      `/api/v1/leads/${leadId}/outreach`,
+      { method: "GET" },
+    );
   },
   regeneratePitch(session: ApiSession, leadId: string) {
     return request<PitchResponse>(session, `/api/v1/leads/${leadId}/pitch`, { method: "POST" });

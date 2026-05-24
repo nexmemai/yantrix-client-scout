@@ -98,7 +98,7 @@ function ToastViewport({
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 right-4 z-50 flex max-w-sm flex-col gap-2"
+      className="pointer-events-none fixed bottom-5 right-5 z-50 flex max-w-sm flex-col gap-2.5"
     >
       {toasts.map((toast) => (
         <ToastCard key={toast.id} toast={toast} onDismiss={onDismiss} />
@@ -120,24 +120,40 @@ function ToastCard({ toast, onDismiss }: { toast: ToastRecord; onDismiss: (id: n
     return () => window.clearTimeout(handle);
   }, [toast.id, toast.durationMs]);
 
-  const { Icon, accent } = variantStyle(toast.variant);
+  const { Icon, accentBar, iconBg, iconColor, titleColor } = variantStyle(toast.variant);
   return (
     <div
       role="status"
-      className={`pointer-events-auto flex items-start gap-3 rounded-lg border bg-white/95 px-3 py-2.5 shadow-lg backdrop-blur ${accent}`}
+      // Glass card with a vertical accent strip in the variant color, an
+      // icon chip, and a dark-on-light text stack. The whole element
+      // animates in via the slide-up keyframe so multi-toast bursts
+      // stagger nicely instead of popping all at once.
+      className="pointer-events-auto relative flex items-start gap-3 overflow-hidden rounded-[12px] border border-[var(--line-strong)] bg-white/85 px-3.5 py-3 pl-4 shadow-[var(--shadow-lg)] backdrop-blur-md animate-slide-up"
     >
-      <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+      {/* Variant accent strip - functions as the colour key without
+          drowning the rest of the card in tinted background. */}
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${accentBar}`} />
+
+      <span
+        className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] ${iconBg} ${iconColor}`}
+      >
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold leading-tight">{toast.title}</div>
+        <div className={`text-[13.5px] font-semibold leading-tight ${titleColor}`}>
+          {toast.title}
+        </div>
         {toast.description ? (
-          <div className="mt-1 text-xs leading-snug text-[var(--muted)] break-words">
+          <div className="mt-1 break-words text-[12px] leading-snug text-zinc-500">
             {toast.description}
           </div>
         ) : null}
       </div>
+
       <button
         aria-label="Dismiss"
-        className="rounded p-1 text-[var(--muted)] transition hover:bg-black/5"
+        className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
         onClick={() => onDismiss(toast.id)}
         type="button"
       >
@@ -147,16 +163,46 @@ function ToastCard({ toast, onDismiss }: { toast: ToastRecord; onDismiss: (id: n
   );
 }
 
-function variantStyle(variant: ToastVariant): { Icon: typeof Info; accent: string } {
+function variantStyle(variant: ToastVariant): {
+  Icon: typeof Info;
+  accentBar: string;
+  iconBg: string;
+  iconColor: string;
+  titleColor: string;
+} {
   switch (variant) {
     case "success":
-      return { Icon: CheckCircle2, accent: "border-[var(--accent)] text-[var(--accent)]" };
+      return {
+        Icon: CheckCircle2,
+        accentBar: "bg-emerald-500",
+        iconBg: "bg-emerald-50",
+        iconColor: "text-emerald-600",
+        titleColor: "text-zinc-900",
+      };
     case "warning":
-      return { Icon: AlertTriangle, accent: "border-[var(--warm)] text-[var(--warm)]" };
+      return {
+        Icon: AlertTriangle,
+        accentBar: "bg-amber-500",
+        iconBg: "bg-amber-50",
+        iconColor: "text-amber-600",
+        titleColor: "text-zinc-900",
+      };
     case "error":
-      return { Icon: AlertTriangle, accent: "border-[var(--danger)] text-[var(--danger)]" };
+      return {
+        Icon: AlertTriangle,
+        accentBar: "bg-rose-500",
+        iconBg: "bg-rose-50",
+        iconColor: "text-rose-600",
+        titleColor: "text-zinc-900",
+      };
     case "info":
     default:
-      return { Icon: Info, accent: "border-[var(--line)] text-[var(--accent)]" };
+      return {
+        Icon: Info,
+        accentBar: "bg-zinc-300",
+        iconBg: "bg-zinc-100",
+        iconColor: "text-zinc-600",
+        titleColor: "text-zinc-900",
+      };
   }
 }

@@ -50,6 +50,23 @@ x-api-environment: &api-environment
   SNAPSHOT_DIR: /app/snapshots
   JUSTDIAL_ENABLED: ${JUSTDIAL_ENABLED:-false}
   PLAYWRIGHT_BROWSERS_PATH: /home/scout/.cache/ms-playwright
+  # Phase 4 - Autonomous Outreach. All defaults are dry-run safe; the
+  # operator opts in by setting credentials and toggling per-run from
+  # the dashboard.
+  OUTREACH_DRY_RUN: ${OUTREACH_DRY_RUN:-true}
+  OUTREACH_AUTOSEND_DEFAULT: ${OUTREACH_AUTOSEND_DEFAULT:-false}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+  SMTP_FROM: ${SMTP_FROM:-}
+  SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-20}
+  WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-meta_cloud}
+  WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+  WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+  WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v20.0}
+  WHATSAPP_TIMEOUT_SECONDS: ${WHATSAPP_TIMEOUT_SECONDS:-20}
 
 services:
   api:

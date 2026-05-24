@@ -109,6 +109,35 @@ class Settings(BaseSettings):
     # ── JustDial (optional, feature-flagged) ─────────────────────────
     JUSTDIAL_ENABLED: bool = False
 
+    # ── Phase 4: Autonomous Outreach ─────────────────────────────────
+    # Master kill-switch. When true, every send call returns a structured
+    # dry-run result regardless of provider config. Useful for sandbox
+    # demos where you want the full pipeline to run end-to-end without
+    # mailing real prospects.
+    OUTREACH_DRY_RUN: bool = True
+    # Default for the run-scout `auto_send_enabled` flag when the client
+    # omits it. We default to FALSE so an accidentally-replayed payload
+    # never starts mass-mailing leads.
+    OUTREACH_AUTOSEND_DEFAULT: bool = False
+
+    # Email transport (SMTP). All five must be set for SmtpEmailSender to
+    # be selected; missing any one falls back to dry-run.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_FROM: str = ""
+    SMTP_TIMEOUT_SECONDS: float = 20.0
+
+    # WhatsApp transport (Meta Cloud API). When provider != 'meta_cloud'
+    # or either credential is empty, the dry-run sender is used.
+    WHATSAPP_PROVIDER: str = "meta_cloud"
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_API_VERSION: str = "v20.0"
+    WHATSAPP_TIMEOUT_SECONDS: float = 20.0
+
 
 @lru_cache
 def get_settings() -> Settings:

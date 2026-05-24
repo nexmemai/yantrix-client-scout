@@ -18,10 +18,16 @@ from app.api.lead_queries import lead_filters
 from app.database import get_db
 from app.models.audit import Audit
 from app.models.business import Business
+from app.models.outreach import OutreachAttempt
 from app.models.pitch import Pitch
 from app.models.score import Score
 from app.schemas.audit import AuditRead
 from app.schemas.business import BusinessListItem, BusinessRead, LeadSalesUpdate
+from app.schemas.outreach import (
+    OutreachAttemptOut,
+    OutreachLeadSummary,
+    OutreachTimelineOut,
+)
 from app.schemas.score import ScoreRead
 from app.services.outreach_helpers import build_outreach_payload
 from app.services.pitch_generator import (
@@ -593,6 +599,52 @@ async def get_lead(
         score=_score_read(business.score, pitch) if business.score else None,
     )
     return data.model_dump(mode="json")
+
+
+@router.get(
+    "/{lead_id}/outreach",
+    response_model=OutreachTimelineOut,
+    status_code=status.HTTP_200_OK,
+    summary="Get the autonomous outreach timeline for a lead",
+)
+async def get_lead_outreach(
+    lead_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> OutreachTimelineOut:
+    """Return the per-lead outreach summary plus full attempt history.
+
+    Envelope shape (summary + attempts) is intentional: the dashboard's
+    Communication Log renders a status header above the timeline list,
+    and rolling both into one response avoids a second round-trip from
+    the LeadDetailPage. The summary is taken from the lead row's
+    denormalised columns (cheap), the timeline from the append-only
+    outreach_attempts table (ordered newest-first, capped at 50 - the
+    UI never needs more than the recent run plus history).
+    """
+    business = await _get_business_or_404(lead_id, db)
+
+    attempts_result = await db.execute(
+        select(OutreachAttempt)
+        .where(OutreachAttempt.business_id == lead_id)
+        .order_by(OutreachAttempt.attempted_at.desc())
+        .limit(50)
+    )
+    attempts = list(attempts_result.scalars().all())
+
+    summary = OutreachLeadSummary(
+        business_id=business.id,
+        outreach_status=business.outreach_status or "idle",
+        email_sent_at=business.email_sent_at,
+        whatsapp_sent_at=business.whatsapp_sent_at,
+        last_outreach_at=business.last_outreach_at,
+        last_outreach_error=business.last_outreach_error,
+        has_email_channel=bool(business.contact_email or business.email),
+        has_whatsapp_channel=bool(business.contact_phone or business.phone),
+    )
+    return OutreachTimelineOut(
+        summary=summary,
+        attempts=[OutreachAttemptOut.model_validate(a) for a in attempts],
+    )
 
 
 async def _get_business_or_404(lead_id: uuid.UUID, db: AsyncSession) -> Business:

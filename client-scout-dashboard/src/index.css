@@ -1,19 +1,122 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+/* ---------------------------------------------------------------------------
+ * Yantrix Client Scout - global design tokens (UI overhaul, Phase 5).
+ *
+ * The previous skin was a warm beige + teal utility look. This rev moves the
+ * dashboard to a sleek zinc-neutral surface with a vibrant emerald primary,
+ * loosely inspired by Linear / Attio / Vercel: cool greys instead of pure
+ * white, deep zinc text instead of pure black, multi-layer shadows instead
+ * of flat borders, and translucent glass panels for any floating surface
+ * (command palette, dropdowns, toasts).
+ *
+ * Why CSS variables instead of pure Tailwind config:
+ *   * The app reaches into `var(--accent)` from a handful of places that
+ *     can't be easily expressed as a Tailwind token (focus rings on raw
+ *     <input>, the SVG path inside the brand mark, the keyframe colors on
+ *     the loading shimmer). Keeping the source of truth in CSS variables
+ *     means a single edit here changes every surface.
+ *   * Tailwind v4's @theme is great for arbitrary classes, but we already
+ *     reference --accent / --muted / --line in dozens of components. Doing
+ *     a giant rename pass is more risk than the win is worth - we just
+ *     repoint the variables to the new palette.
+ *
+ * Token map (zinc/emerald):
+ *   --bg                 page background (zinc-50)
+ *   --surface            default panel (zinc-100 with low opacity for layering)
+ *   --surface-strong     opaque panel for cards / tables
+ *   --surface-glass      translucent for floating layers (modals, palette)
+ *   --line               default border, very low contrast (zinc-200/60)
+ *   --line-strong        emphasised border for separation
+ *   --text               primary text (zinc-900, not pure black)
+ *   --muted              secondary text (zinc-500)
+ *   --subtle             tertiary text (zinc-400)
+ *   --accent             primary emerald (emerald-500)
+ *   --accent-strong      hover/pressed (emerald-600)
+ *   --accent-soft        100-level emerald for soft backgrounds
+ *   --warm / --danger    secondary signal colors (amber, rose)
+ *
+ * Shadows:
+ *   --shadow-sm          1-layer subtle (form fields)
+ *   --shadow-md          2-layer floating (cards on hover)
+ *   --shadow-lg          3-layer dialog (palette, dropdowns)
+ *   --shadow-glow        accent-tinted halo (primary buttons on hover)
+ * ------------------------------------------------------------------------- */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 :root {
   color-scheme: light;
-  --bg: #f4f1ea;
-  --panel: #fcfaf6;
-  --panel-strong: #ffffff;
-  --line: #d5cec1;
-  --text: #201d18;
-  --muted: #675f54;
-  --accent: #0f766e;
-  --accent-strong: #115e59;
-  --warm: #b45309;
-  --danger: #b42318;
-  font-family: "Manrope", sans-serif;
+
+  /* Surfaces */
+  --bg: #fafafa;
+  --bg-tint: #f4f4f5;
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-strong: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.78);
+  --surface-glass-strong: rgba(255, 255, 255, 0.92);
+
+  /* Borders - kept very light so they read as separators, not boxes */
+  --line: rgba(228, 228, 231, 0.7);
+  --line-strong: rgba(212, 212, 216, 0.9);
+
+  /* Text */
+  --text: #18181b;        /* zinc-900 */
+  --text-strong: #09090b; /* zinc-950 - reserved for display sizes */
+  --muted: #71717a;       /* zinc-500 */
+  --subtle: #a1a1aa;      /* zinc-400 */
+
+  /* Primary accent - emerald */
+  --accent: #10b981;        /* emerald-500 */
+  --accent-strong: #059669;  /* emerald-600 */
+  --accent-pressed: #047857; /* emerald-700 */
+  --accent-soft: #d1fae5;    /* emerald-100 */
+  --accent-soft-text: #065f46;/* emerald-800 */
+
+  /* Secondary signals */
+  --warm: #d97706;         /* amber-600 */
+  --warm-soft: #fef3c7;    /* amber-100 */
+  --warm-soft-text: #92400e;/* amber-800 */
+
+  --danger: #e11d48;       /* rose-600 */
+  --danger-soft: #ffe4e6;  /* rose-100 */
+  --danger-soft-text: #9f1239;/* rose-800 */
+
+  /* Radius scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* Shadows - composed instead of single drop shadows so depth feels real */
+  --shadow-sm: 0 1px 2px 0 rgba(24, 24, 27, 0.04),
+               0 1px 1px 0 rgba(24, 24, 27, 0.03);
+  --shadow-md: 0 1px 2px 0 rgba(24, 24, 27, 0.04),
+               0 4px 12px -2px rgba(24, 24, 27, 0.06),
+               0 1px 1px 0 rgba(24, 24, 27, 0.03);
+  --shadow-lg: 0 1px 2px 0 rgba(24, 24, 27, 0.05),
+               0 8px 24px -4px rgba(24, 24, 27, 0.10),
+               0 16px 48px -12px rgba(24, 24, 27, 0.18);
+  --shadow-glow: 0 0 0 1px rgba(16, 185, 129, 0.18),
+                 0 6px 24px -6px rgba(16, 185, 129, 0.40);
+
+  /* Focus ring - matches accent at low opacity, used by buttons + inputs.
+     Pulled into a variable so the keyboard ring is identical everywhere. */
+  --focus-ring: 0 0 0 3px rgba(16, 185, 129, 0.28);
+
+  font-family: "Inter", "Manrope", ui-sans-serif, system-ui, -apple-system,
+               BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Use SF/system display weight + tighter tracking for headings - the visual
+   "premium SaaS" cue. Body keeps a more neutral tracking so dense data tables
+   stay readable. */
+h1, h2, h3, h4, .display {
+  letter-spacing: -0.02em;
 }
 
 * {
@@ -28,9 +131,13 @@ body,
 
 body {
   margin: 0;
+  /* Two soft radial highlights instead of the previous warm gradient.
+     The emerald wash sits behind the sidebar, the second sits in the
+     top-right where the command palette button lives, so the eye is
+     gently nudged toward the action surfaces without screaming. */
   background:
-    linear-gradient(180deg, rgba(15, 118, 110, 0.04), transparent 20%),
-    linear-gradient(90deg, rgba(180, 83, 9, 0.05), transparent 28%),
+    radial-gradient(1200px 600px at -10% -10%, rgba(16, 185, 129, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 110% -10%, rgba(99, 102, 241, 0.05), transparent 55%),
     var(--bg);
   color: var(--text);
 }
@@ -42,44 +149,102 @@ textarea {
   font: inherit;
 }
 
+::selection {
+  background-color: rgba(16, 185, 129, 0.22);
+  color: var(--text-strong);
+}
+
+/* ---------------------------------------------------------------------------
+ * App shell
+ * ------------------------------------------------------------------------- */
+
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  /* Slightly narrower default sidebar; collapsed mode shrinks to the icon
+     rail width so the main content gets a bigger canvas. */
+  grid-template-columns: 256px minmax(0, 1fr);
+  transition: grid-template-columns 220ms ease;
+}
+
+.app-shell[data-sidebar="collapsed"] {
+  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .sidebar-surface {
-  background: rgba(252, 250, 246, 0.92);
+  background: var(--surface-glass-strong);
   border-right: 1px solid var(--line);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
 }
 
+/* ---------------------------------------------------------------------------
+ * Surfaces
+ * ------------------------------------------------------------------------- */
+
 .surface {
-  background: rgba(252, 250, 246, 0.86);
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .surface-strong {
-  background: var(--panel-strong);
+  background: var(--surface-strong);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
+
+/* Floating glass panel - command palette, dropdowns, large modals.
+   Heavier backdrop blur + the lg shadow so it visibly detaches from
+   whatever's behind it. */
+.surface-glass {
+  background: var(--surface-glass);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ---------------------------------------------------------------------------
+ * Form controls
+ * ------------------------------------------------------------------------- */
 
 .field {
   width: 100%;
-  border: 1px solid var(--line);
-  background: #fffdf9;
-  border-radius: 8px;
-  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.85rem;
   color: var(--text);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
-.field:focus {
-  outline: 2px solid rgba(15, 118, 110, 0.25);
-  outline-offset: 0;
-  border-color: var(--accent);
+.field::placeholder {
+  color: var(--subtle);
 }
+
+.field:hover {
+  border-color: rgba(161, 161, 170, 0.55);
+}
+
+.field:focus-visible,
+.field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons
+ *
+ * One control class with three variants. Every button shares the same
+ * radius, transition curve, and active translate so the language is
+ * consistent app-wide.
+ * ------------------------------------------------------------------------- */
 
 .icon-button,
 .button {
@@ -87,34 +252,79 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease,
+              color 160ms ease, box-shadow 160ms ease, transform 80ms ease;
+}
+
+.button:focus-visible,
+.icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.button:active,
+.icon-button:active {
+  transform: translateY(1px);
 }
 
 .button-primary {
   background: var(--accent);
-  color: white;
+  color: #ffffff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset,
+              0 1px 2px rgba(6, 95, 70, 0.35);
 }
 
 .button-primary:hover {
   background: var(--accent-strong);
+  box-shadow: var(--shadow-glow);
+}
+
+.button-primary:active {
+  background: var(--accent-pressed);
 }
 
 .button-secondary {
-  border-color: var(--line);
-  background: rgba(255, 255, 255, 0.66);
+  border-color: var(--line-strong);
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.button-secondary:hover {
+  border-color: rgba(161, 161, 170, 0.65);
+  background: #fafafa;
+}
+
+.button-ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+.button-ghost:hover {
+  background: var(--bg-tint);
   color: var(--text);
 }
 
 .button-danger {
-  border-color: rgba(180, 35, 24, 0.22);
-  background: rgba(180, 35, 24, 0.08);
+  border-color: rgba(225, 29, 72, 0.25);
+  background: rgba(225, 29, 72, 0.08);
   color: var(--danger);
 }
 
+.button-danger:hover {
+  background: rgba(225, 29, 72, 0.12);
+}
+
+/* ---------------------------------------------------------------------------
+ * Tables
+ * ------------------------------------------------------------------------- */
+
 .table-wrap {
   overflow: auto;
+  border-radius: var(--radius-lg);
 }
 
 .table-wrap table {
@@ -126,32 +336,193 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f7f3ec;
+  /* Soft frosted header. Pure white reads too aggressive once the rows
+     get a hover state; this sits one tone above the body. */
+  background: rgba(244, 244, 245, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0;
+  letter-spacing: 0.04em;
 }
 
 .table-wrap th,
 .table-wrap td {
-  padding: 0.8rem 0.9rem;
-  border-bottom: 1px solid rgba(213, 206, 193, 0.8);
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: middle;
 }
 
-.table-row-link:hover {
-  background: rgba(15, 118, 110, 0.05);
+.table-wrap tbody tr {
+  transition: background-color 120ms ease;
 }
+
+.table-wrap tbody tr:hover {
+  background: rgba(244, 244, 245, 0.6);
+}
+
+.table-row-link {
+  color: var(--text);
+  transition: color 120ms ease;
+}
+
+.table-row-link:hover {
+  color: var(--accent-pressed);
+}
+
+/* ---------------------------------------------------------------------------
+ * Status pills
+ *
+ * Soft tinted background + saturated foreground - the Linear/Attio look.
+ * Reused from a handful of components, so worth a single source of truth.
+ * ------------------------------------------------------------------------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.pill-emerald {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.pill-amber {
+  background: var(--warm-soft);
+  color: var(--warm-soft-text);
+}
+
+.pill-rose {
+  background: var(--danger-soft);
+  color: var(--danger-soft-text);
+}
+
+.pill-sky {
+  background: #e0f2fe;     /* sky-100 */
+  color: #075985;          /* sky-800 */
+}
+
+.pill-violet {
+  background: #ede9fe;     /* violet-100 */
+  color: #5b21b6;          /* violet-800 */
+}
+
+.pill-zinc {
+  background: var(--bg-tint);
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+/* ---------------------------------------------------------------------------
+ * Page header utilities
+ * ------------------------------------------------------------------------- */
 
 .section-band {
-  padding: 1rem 1.1rem;
+  padding: 1.25rem 1.4rem;
 }
 
+.metric-card {
+  position: relative;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.metric-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+/* ---------------------------------------------------------------------------
+ * Kanban
+ * ------------------------------------------------------------------------- */
+
+.kanban-card {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 160ms ease, border-color 160ms ease,
+              transform 160ms ease;
+}
+
+.kanban-card:hover {
+  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.kanban-card[data-dragging="true"] {
+  box-shadow: var(--shadow-lg);
+  transform: rotate(0.6deg) scale(1.02);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.kanban-column[data-over="true"] {
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+/* ---------------------------------------------------------------------------
+ * Animations
+ * ------------------------------------------------------------------------- */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease both;
+}
+
+.animate-slide-up {
+  animation: slide-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Skeleton loader for empty/loading states. Cool zinc base with a single
+   highlight band that drifts across - subtle, not flashy. */
+.skeleton {
+  background: linear-gradient(90deg,
+    rgba(244, 244, 245, 1) 0%,
+    rgba(228, 228, 231, 1) 50%,
+    rgba(244, 244, 245, 1) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: var(--radius-md);
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive
+ * ------------------------------------------------------------------------- */
+
 @media (max-width: 980px) {
-  .app-shell {
+  .app-shell,
+  .app-shell[data-sidebar="collapsed"] {
     grid-template-columns: 1fr;
   }
 }

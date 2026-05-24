@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Filter, Play } from "lucide-react";
 import { Filter, Play } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { apiClient, ApiSession } from "../api/client";
@@ -39,6 +40,11 @@ export function LeadsPage({ session }: LeadsPageProps) {
   const [runNiche, setRunNiche] = useState("dental");
   const [runCity, setRunCity] = useState("");
   const [maxBusinesses, setMaxBusinesses] = useState(25);
+  // Phase 4 - Autonomous Outreach toggle. Defaults to false so a user
+  // who never noticed the switch never accidentally mass-mails leads.
+  // The toast / aria-live announcement on flip-to-true reinforces that
+  // intent before submission.
+  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   // Server-side filters consumed by the virtualised table. We only forward
@@ -76,11 +82,17 @@ export function LeadsPage({ session }: LeadsPageProps) {
         niche: runNiche.trim(),
         city: runCity.trim(),
         max_businesses: maxBusinesses,
+        auto_send_enabled: autoSendEnabled,
       }),
     onSuccess: (response) => {
       setActiveJobId(response.job_id);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      toast.info("Scout queued", `Job ${response.job_id.slice(0, 8)}… is in the queue.`);
+      toast.info(
+        autoSendEnabled ? "Scout queued (auto-send ON)" : "Scout queued",
+        autoSendEnabled
+          ? `Job ${response.job_id.slice(0, 8)}… - high/mid-fit leads will be auto-contacted as pitches generate.`
+          : `Job ${response.job_id.slice(0, 8)}… is in the queue.`,
+      );
     },
     onError: (error: unknown) => {
       toast.error(
@@ -196,6 +208,13 @@ export function LeadsPage({ session }: LeadsPageProps) {
             {jobRunning ? "Running..." : "Run Scout"}
           </button>
           <div className="lg:col-span-4">
+            <AutoSendToggle
+              enabled={autoSendEnabled}
+              disabled={jobRunning}
+              onChange={setAutoSendEnabled}
+            />
+          </div>
+          <div className="lg:col-span-4">
             {job ? (
               <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-[var(--line)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--muted)]">
                 <span
@@ -286,6 +305,95 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
     <div className="rounded-lg border border-[var(--line)] bg-white/70 px-3 py-2">
       <div className="text-xs font-bold uppercase text-[var(--muted)]">{label}</div>
       <div className="mt-1 text-xl font-extrabold">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Phase 4 - Autonomous Outreach toggle.
+ *
+ * Pure controlled component. Visual treatment is intentionally weighty:
+ *   * amber background when ON to flag "this is a high-risk action",
+ *   * an accompanying warning band that only appears when ON so users
+ *     reading the form for the first time aren't desensitised to it,
+ *   * disabled state respects the parent form's running flag so the
+ *     state can't change mid-run.
+ *
+ * The actual switch is built from a hidden checkbox + a styled label so
+ * it stays accessible (keyboard space-bar toggles, screen readers see
+ * "checkbox" with its label and aria-describedby). No headless-ui import
+ * needed; we already keep the dashboard dependency surface tight.
+ */
+function AutoSendToggle({
+  enabled,
+  disabled,
+  onChange,
+}: {
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div
+      className={`rounded-lg border px-4 py-3 transition ${
+        enabled
+          ? "border-[var(--warm)] bg-amber-50"
+          : "border-[var(--line)] bg-white/60"
+      }`}
+    >
+      <label className="flex cursor-pointer items-start gap-3">
+        <span className="relative inline-flex shrink-0 items-center">
+          <input
+            aria-describedby="auto-send-helper"
+            checked={enabled}
+            className="peer sr-only"
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.checked)}
+            type="checkbox"
+          />
+          {/* Track */}
+          <span
+            aria-hidden="true"
+            className={`block h-6 w-11 rounded-full transition ${
+              enabled ? "bg-[var(--warm)]" : "bg-stone-300"
+            } peer-disabled:opacity-50`}
+          />
+          {/* Thumb */}
+          <span
+            aria-hidden="true"
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+              enabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-bold text-[var(--text)]">
+            Fully Automated Mode (Auto-Send Pitches)
+          </span>
+          <span
+            className="mt-1 block text-xs leading-snug text-[var(--muted)]"
+            id="auto-send-helper"
+          >
+            When enabled, the worker emails and WhatsApps every high-fit and
+            mid-fit lead using the AI-generated pitch as soon as it is
+            produced. There is no human review step.
+          </span>
+        </span>
+      </label>
+      {enabled ? (
+        <div
+          aria-live="polite"
+          className="mt-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-100/70 px-3 py-2 text-xs font-semibold leading-snug text-amber-900"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Warning: This will automatically send the AI-generated email and
+            WhatsApp pitch without human review. Confirm SMTP and WhatsApp
+            credentials are configured before launching a real run; otherwise
+            attempts will be recorded as dry-runs.
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

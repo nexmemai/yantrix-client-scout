@@ -84,6 +84,11 @@ class ResolvedNiche:
     search_phrase: str
     source: str  # "db" | "built_in" | "generic"
     config: NicheConfig | None = None
+    # Per-niche pitch tone resolved from the DB row (when present). None
+    # means "fall through to whatever tone the caller passed, or the system
+    # default in pitch_generator.DEFAULT_TONE". Kept on ResolvedNiche so
+    # callers don't have to peek at config.pitch_tone themselves.
+    tone: str | None = None
 
 
 class InvalidNicheError(ValueError):
@@ -151,13 +156,23 @@ async def resolve_niche(raw: str, db: AsyncSession) -> ResolvedNiche:
             or BUILT_IN_NICHE_PHRASES.get(key)
             or _generic_phrase(display)
         )
-        logger.debug("[NICHE] resolved key=%s via=db phrase=%r", key, phrase)
+        # Tone comes from the same row when set; the resolver intentionally
+        # does NOT fall back to a hardcoded niche-tone map because the whole
+        # point of the column is to make this DB-driven and editable.
+        tone = (config.pitch_tone or None)
+        if tone is not None:
+            tone = tone.strip().lower() or None
+        logger.debug(
+            "[NICHE] resolved key=%s via=db phrase=%r tone=%s",
+            key, phrase, tone,
+        )
         return ResolvedNiche(
             key=key,
             display=display,
             search_phrase=phrase,
             source="db",
             config=config,
+            tone=tone,
         )
 
     if key in BUILT_IN_NICHE_PHRASES:
@@ -169,6 +184,7 @@ async def resolve_niche(raw: str, db: AsyncSession) -> ResolvedNiche:
             search_phrase=phrase,
             source="built_in",
             config=None,
+            tone=None,
         )
 
     phrase = _generic_phrase(display)
@@ -183,6 +199,7 @@ async def resolve_niche(raw: str, db: AsyncSession) -> ResolvedNiche:
         search_phrase=phrase,
         source="generic",
         config=None,
+        tone=None,
     )
 
 

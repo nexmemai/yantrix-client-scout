@@ -263,7 +263,17 @@ async def generate_and_save_pitch(
         raise PitchContextMissingError("A score is required before generating a pitch.")
 
     niche_config = await _load_niche_config(business.niche, db)
-    draft = await generate_pitch(business, audit, score, niche_config, tone=tone)
+    # When the caller asks for "auto" (the default), fall through to the
+    # niche's configured tone if there is one. This way the LeadDetailPage
+    # "Regenerate pitch" button and the single-pitch ARQ task both get the
+    # right voice without needing to pass tone explicitly.
+    effective_tone = tone
+    if effective_tone == "auto" and niche_config is not None:
+        configured = (niche_config.pitch_tone or "").strip().lower()
+        if configured:
+            effective_tone = configured
+
+    draft = await generate_pitch(business, audit, score, niche_config, tone=effective_tone)
 
     pitch = Pitch(
         id=uuid.uuid4(),
@@ -273,7 +283,7 @@ async def generate_and_save_pitch(
         subject_line=draft.subject_line,
         recommended_services=draft.recommended_services,
         objection_handlers=draft.objection_handlers,
-        tone=tone,
+        tone=effective_tone if effective_tone != "auto" else DEFAULT_TONE,
         language=language,
         llm_provider=draft.llm_provider,
         llm_model=draft.llm_model,

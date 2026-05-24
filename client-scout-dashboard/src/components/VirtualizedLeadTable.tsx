@@ -1,7 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Inbox, MessageCircle } from "lucide-react";
-import { ChevronRight, MessageCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ApiSession, apiClient } from "../api/client";
 import {
@@ -53,7 +52,6 @@ const QUICK_STATUSES: Array<{
   className: string;
 }> = [
   { key: "new",        apiValue: "new",         label: "New",       className: "bg-zinc-300" },
-  { key: "new",        apiValue: "new",         label: "New",       className: "bg-stone-300" },
   { key: "contacted",  apiValue: "contacted",   label: "Contacted", className: "bg-amber-400" },
   { key: "qualified",  apiValue: "meeting_set", label: "Qualified", className: "bg-sky-500" },
   { key: "won",        apiValue: "won",         label: "Won",       className: "bg-emerald-500" },
@@ -279,7 +277,6 @@ export function VirtualizedLeadTable({
             <div key={idx} className="skeleton h-12 w-full" />
           ))}
         </div>
-        <div className="p-6 text-sm text-[var(--muted)]">Loading leads…</div>
       ) : (
         <>
           <table>
@@ -314,8 +311,6 @@ export function VirtualizedLeadTable({
                 <tr>
                   <td colSpan={8} className="px-5 py-12">
                     <EmptyTableState />
-                  <td colSpan={8} className="p-6 text-sm text-[var(--muted)]">
-                    No leads match the current filters.
                   </td>
                 </tr>
               ) : null}
@@ -324,7 +319,6 @@ export function VirtualizedLeadTable({
           <div
             ref={sentinelRef}
             className="flex items-center justify-center py-3 text-xs font-medium text-zinc-400"
-            className="flex items-center justify-center py-3 text-xs text-[var(--muted)]"
             aria-live="polite"
           >
             {isFetchingNextPage
@@ -415,23 +409,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
       <td>
         <span className={`pill ${leadStatusPillClass(lead.lead_status)}`}>
           {leadStatusLabel(lead.lead_status)}
-          className="table-row-link flex items-center justify-between gap-3 rounded-md px-2 py-1 -mx-2"
-          to={`/leads/${lead.id}`}
-        >
-          <div className="min-w-0">
-            <div className="truncate font-semibold">{lead.name}</div>
-            <div className="text-xs text-[var(--muted)]">
-              {lead.category ?? "Unknown niche"}
-            </div>
-          </div>
-          <ChevronRight className="h-4 w-4 text-[var(--muted)]" />
-        </Link>
-      </td>
-      <td>{lead.city}</td>
-      <td>{lead.has_website ? "Yes" : "No"}</td>
-      <td>
-        <span className="rounded-full border border-[var(--line)] bg-white/70 px-2 py-1 text-xs font-semibold">
-          {lead.lead_status}
         </span>
       </td>
       <td>
@@ -440,10 +417,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
             {lead.overall_score ?? 0}
           </span>
           <span className={`pill ${scoreBucketTone(currentBucket)}`}>
-          <span className="font-semibold">{lead.overall_score ?? 0}</span>
-          <span
-            className={`rounded-full px-2 py-1 text-xs font-semibold ${scoreBucketTone(currentBucket)}`}
-          >
             {currentBucket}
           </span>
         </div>
@@ -463,18 +436,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
       <td className="text-[12px] text-zinc-500">{formatDate(lead.created_at)}</td>
       <td>
         <div className="flex items-center justify-end gap-2">
-        <div className="grid gap-1 text-sm">
-          <span className="font-semibold">{lead.agency_fit_bucket ?? "-"}</span>
-          <span className="text-xs text-[var(--muted)]">
-            {lead.estimated_deal_value
-              ? `₹${lead.estimated_deal_value.toLocaleString("en-IN")}`
-              : "-"}
-          </span>
-        </div>
-      </td>
-      <td>{formatDate(lead.created_at)}</td>
-      <td>
-        <div className="flex items-center justify-end gap-1.5">
           {/* WhatsApp deep-link icon. Detail fetch happens on click, not on hover,
               to avoid a wave of GETs as the user scrolls. */}
           <button
@@ -486,7 +447,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
               onWhatsApp();
             }}
             className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[var(--shadow-sm)] transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
-            className="rounded-md border border-[var(--line)] bg-white/70 p-1.5 transition hover:border-emerald-400 hover:text-emerald-600"
           >
             <MessageCircle className="h-3.5 w-3.5" />
           </button>
@@ -496,8 +456,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
               dot gets an emerald ring + small scale-up so it pops without
               shifting layout. */}
           <div className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white p-1 shadow-[var(--shadow-sm)]">
-              shows the canonical operator label as a tooltip. */}
-          <div className="flex items-center gap-1 rounded-full border border-[var(--line)] bg-white/70 p-1">
             {QUICK_STATUSES.map((status) => {
               const active = lead.lead_status === status.apiValue;
               return (
@@ -516,10 +474,6 @@ function LeadRow({ lead, isPending, onSetStatus, onWhatsApp }: LeadRowProps) {
                     active
                       ? "ring-2 ring-emerald-400 ring-offset-1 ring-offset-white scale-110"
                       : "opacity-50 hover:opacity-100 hover:scale-110"
-                  className={`h-3 w-3 rounded-full transition ${status.className} ${
-                    active
-                      ? "ring-2 ring-offset-1 ring-[var(--accent)]"
-                      : "opacity-60 hover:opacity-100"
                   } disabled:cursor-wait`}
                 />
               );

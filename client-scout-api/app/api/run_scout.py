@@ -248,7 +248,6 @@ async def run_scout(
 
     logger.info(
         "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s auto_send=%s",
-        "[Job %s] [PIPELINE] enqueued niche=%s key=%s phrase=%r city=%s depth=%d max_businesses=%d source=%s tone=%s tone_source=%s",
         job.id,
         payload.niche,
         resolved.key,

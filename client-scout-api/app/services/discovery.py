@@ -26,7 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.business import Business
 from app.models.job import DiscoveryJob
-from app.services.gmaps_client import GmapsRawBusiness, GmapsScraperClient
+from app.services.gmaps_client import (
+    GmapsRawBusiness,
+    GmapsScraperClient,
+    GosomJobFailedError,
+    GosomJobStuckPendingError,
+    GosomJobTimeoutError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +85,54 @@ async def discover_businesses(
     :returns: List of newly inserted business UUIDs (duplicates excluded).
     """
     query = _build_query(search_phrase, niche, city)
-    logger.info("[DISCOVERY] starting: query=%r niche=%r city=%r", query, niche, city)
+    logger.info("[DISCOVERY] starting: query=%r niche=%r city=%r depth=%d", query, niche, city, depth)
 
     client = GmapsScraperClient()
 
-    # --- Step 1 & 2: Submit and wait ---
-    job_id = await client.submit_job(query, depth=depth)
-    raw_businesses = await client.wait_for_results(job_id)
+    # --- Step 1 & 2: Submit and wait (with automatic retry on stuck-pending) ---
+    try:
+        raw_businesses = await client.wait_for_results_with_retry(
+            query=query,
+            depth=depth,
+            max_wait=900.0,
+            max_attempts=2,
+        )
+    except GosomJobStuckPendingError as exc:
+        logger.error(
+            "[DISCOVERY] gosom job %s stuck pending after retry: niche=%r city=%r query=%r",
+            exc.job_id, niche, city, query,
+        )
+        if job:
+            job.error_message = str(exc)[:2000]
+        raise
+    except GosomJobTimeoutError as exc:
+        logger.error(
+            "[DISCOVERY] gosom job %s timed out: niche=%r city=%r query=%r last_state=%r",
+            exc.job_id, niche, city, query, exc.last_state,
+        )
+        if job:
+            job.error_message = str(exc)[:2000]
+        raise
+    except GosomJobFailedError as exc:
+        logger.error(
+            "[DISCOVERY] gosom job %s failed with state=%r: niche=%r city=%r",
+            exc.job_id, exc.state, niche, city,
+        )
+        if job:
+            job.error_message = str(exc)[:2000]
+        raise
+    except Exception as exc:
+        logger.error(
+            "[DISCOVERY] unexpected error during scraper interaction: niche=%r city=%r query=%r error=%s",
+            niche, city, query, exc,
+            exc_info=True,
+        )
+        raise
+
+    logger.info(
+        "[DISCOVERY] scraper returned %d raw results for niche=%r city=%r",
+        len(raw_businesses), niche, city,
+    )
 
     # Cap results
     if len(raw_businesses) > max_results:
@@ -106,10 +153,6 @@ async def discover_businesses(
         db=db,
         discovery_job_id=job.id if job else None,
     )
-
-    if job:
-        job.total_discovered = len(raw_businesses)
-        await db.flush()
 
     logger.info(
         "[DISCOVERY] complete: %d raw → %d new businesses for %r in %r",

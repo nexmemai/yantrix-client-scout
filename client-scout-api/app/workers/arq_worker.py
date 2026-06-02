@@ -21,11 +21,11 @@ import logging
 import socket
 from typing import Any
 
-from arq.connections import RedisSettings
 from arq.cron import cron
 from arq.worker import func as arq_func
 
 from app.config import get_settings
+from app.workers.redis_settings import build_redis_settings
 from app.workers.tasks import (
     reap_stale_jobs,
     run_audit_task,
@@ -36,20 +36,6 @@ from app.workers.tasks import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Redis settings helper
-# ---------------------------------------------------------------------------
-
-
-def build_redis_settings() -> RedisSettings:
-    """Parse REDIS_URL into the structured form ARQ expects.
-
-    Centralised so the API container (queue.py) and the worker container both
-    talk to the same broker with identical retry/connection behaviour.
-    """
-    return RedisSettings.from_dsn(get_settings().REDIS_URL)
 
 
 # ---------------------------------------------------------------------------

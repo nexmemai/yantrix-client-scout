@@ -25,7 +25,7 @@ from arq.connections import ArqRedis
 from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.workers.arq_worker import build_redis_settings
+from app.workers.redis_settings import build_redis_settings
 
 logger = logging.getLogger(__name__)
 

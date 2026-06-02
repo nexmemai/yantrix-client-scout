@@ -118,8 +118,9 @@ _GOSOM_CSV_COLUMNS = {
 }
 
 # How long a job can sit in "pending" before we consider it stuck and attempt
-# a resubmit.  Gosom typically transitions pending→running within 10-30s.
-_STUCK_PENDING_THRESHOLD_SECONDS = 300.0
+# a resubmit.  Gosom processes jobs on-demand when the HTTP endpoint is hit,
+# so jobs that haven't transitioned within 30s are likely stuck.
+_STUCK_PENDING_THRESHOLD_SECONDS = 30.0
 
 # Terminal states that mean the scraper will never produce results.
 _TERMINAL_SUCCESS_STATES = frozenset({"completed", "ok"})
@@ -139,7 +140,7 @@ class GmapsScraperClient:
     def __init__(self) -> None:
         settings = get_settings()
         self._base_url = settings.GMAPS_SCRAPER_URL.rstrip("/")
-        self._timeout = httpx.Timeout(60.0, read=300.0)
+        self._timeout = httpx.Timeout(60.0, read=600.0)
 
     # ------------------------------------------------------------------
     # Public API
@@ -227,16 +228,21 @@ class GmapsScraperClient:
     async def wait_for_results(
         self,
         job_id: str,
-        poll_interval: float = 15.0,
-        max_wait: float = 900.0,
+        poll_interval: float = 3.0,
+        max_wait: float = 60.0,
     ) -> list["GmapsRawBusiness"]:
         """
         Poll until the job is complete, then return parsed results.
 
         Raises ``GosomJobStuckPendingError`` if the job stays in ``pending``
-        past ``2 × _STUCK_PENDING_THRESHOLD_SECONDS``.  Callers that want
+        past ``_STUCK_PENDING_THRESHOLD_SECONDS`` (30s).  Callers that want
         automatic resubmit on stuck-pending should use
         :meth:`wait_for_results_with_retry` instead.
+
+        The scrapemate container processes jobs on-demand and may exit after
+        completing a batch — this is normal behaviour.  The short poll interval
+        (3s default) and tight max_wait (60s default) ensure we fail fast and
+        resubmit rather than burning the full worker timeout.
 
         :raises GosomJobTimeoutError: if the job does not complete within max_wait seconds.
         :raises GosomJobFailedError: if the job reaches a terminal failure state.
@@ -285,7 +291,9 @@ class GmapsScraperClient:
             if state in _TERMINAL_FAILURE_STATES:
                 raise GosomJobFailedError(job_id, state, status)
 
-            # Detect stuck-pending: warn once, then raise after a generous window
+            # Detect stuck-pending: warn once, then raise once past threshold.
+            # Scrapemate processes jobs on-demand; if a job hasn't left
+            # "pending" within 30s it's almost certainly stuck.
             if state == "pending" and elapsed > _STUCK_PENDING_THRESHOLD_SECONDS:
                 if not stuck_pending_warned:
                     logger.warning(
@@ -295,9 +303,8 @@ class GmapsScraperClient:
                     )
                     stuck_pending_warned = True
 
-                # If still pending after 2x the threshold, give up with an
-                # actionable error rather than burning the full 900s.
-                if elapsed > _STUCK_PENDING_THRESHOLD_SECONDS * 2:
+                # Cancel and raise immediately so the retry loop can resubmit.
+                if elapsed > _STUCK_PENDING_THRESHOLD_SECONDS:
                     raise GosomJobStuckPendingError(job_id, elapsed, status)
 
             await asyncio.sleep(poll_interval)
@@ -309,8 +316,8 @@ class GmapsScraperClient:
         self,
         query: str,
         depth: int = 1,
-        poll_interval: float = 15.0,
-        max_wait: float = 900.0,
+        poll_interval: float = 3.0,
+        max_wait: float = 120.0,
         max_attempts: int = 2,
     ) -> list["GmapsRawBusiness"]:
         """Submit, poll, and retry once if the first job gets stuck pending.

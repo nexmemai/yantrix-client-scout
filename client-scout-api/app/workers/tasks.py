@@ -38,7 +38,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models.job import DiscoveryJob
-from app.workers.queue import publish_job_event
+
+
+# Lazy import to avoid circular dependency with app.workers.queue.
+# Import chain without this: main → jobs → queue → arq_worker → tasks → queue ← circular.
+async def publish_job_event(*args, **kwargs):
+    from app.workers.queue import publish_job_event as _pje
+    return await _pje(*args, **kwargs)
+
 
 logger = logging.getLogger(__name__)
 

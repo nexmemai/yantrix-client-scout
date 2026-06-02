@@ -23,6 +23,7 @@ from typing import Any
 
 from arq.connections import RedisSettings
 from arq.cron import cron
+from arq.worker import func as arq_func
 
 from app.config import get_settings
 
@@ -76,6 +77,41 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
     logger.info("[ARQ] worker shutdown worker_id=%s", ctx.get("worker_id"))
 
 
+async def on_job_abort(ctx: dict[str, Any], job_id: str) -> None:
+    """Called by ARQ when the reaper kills a job.
+
+    Updates the DiscoveryJob row to `failed` with a clear message so the
+    dashboard shows the correct status instead of leaving it stuck on
+    'running' forever.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    logger.warning("[ARQ] job aborted by reaper: %s", job_id)
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.job import DiscoveryJob
+
+        now = datetime.now(tz=timezone.utc)
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(DiscoveryJob)
+                .where(DiscoveryJob.id == uuid.UUID(job_id))
+                .values(
+                    status="failed",
+                    error_message="reaper: worker died or never picked up the job",
+                    completed_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+        logger.info("[ARQ] job %s marked failed by abort handler", job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[ARQ] on_job_abort failed for job %s: %s", job_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # WorkerSettings (the ARQ contract)
 # ---------------------------------------------------------------------------
@@ -112,6 +148,7 @@ class WorkerSettings:
     # Lifecycle hooks
     on_startup = staticmethod(on_startup)
     on_shutdown = staticmethod(on_shutdown)
+    on_job_abort = staticmethod(on_job_abort)
 
     # Lazy registration: the resolver imports the tasks module on demand so
     # the API container can import this file (to enqueue jobs) without
@@ -122,11 +159,11 @@ class WorkerSettings:
         from app.workers import tasks
 
         return [
-            tasks.run_discovery_task,
-            tasks.run_audit_task,
-            tasks.run_score_task,
-            tasks.run_pitch_task,
-            tasks.run_send_outreach_task,
+            arq_func(tasks.run_discovery_task, max_tries=2),
+            arq_func(tasks.run_audit_task, max_tries=2),
+            arq_func(tasks.run_score_task, max_tries=2),
+            arq_func(tasks.run_pitch_task, max_tries=2),
+            arq_func(tasks.run_send_outreach_task, max_tries=2),
         ]
 
     @classmethod

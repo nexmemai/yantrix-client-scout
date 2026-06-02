@@ -80,8 +80,41 @@ async def _check_scraper() -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Fail fast when DB, scraper, or Playwright are not ready."""
+    import os
+    import urllib.parse
+
     logger.info("[STARTUP] %s v%s starting", settings.APP_NAME, settings.APP_VERSION)
     STARTUP_CHECKS.update({"db": False, "playwright": False, "scraper": False})
+
+    # ── Fix 4: resolve DB_HOST from DATABASE_URL when not explicitly set ──
+    if not os.environ.get("DB_HOST"):
+        db_url = os.environ.get("DATABASE_URL", "")
+        if db_url:
+            parsed = urllib.parse.urlparse(db_url)
+            resolved_host = parsed.hostname or "db"
+            logger.info(
+                "[STARTUP] DB_HOST not set; resolved '%s' from DATABASE_URL", resolved_host
+            )
+            os.environ["DB_HOST"] = resolved_host
+        else:
+            os.environ.setdefault("DB_HOST", "db")
+            logger.info("[STARTUP] DB_HOST not set and no DATABASE_URL; defaulting to 'db'")
+
+    # ── Fix 5: warn on missing LLM API keys ──
+    llm_provider = os.environ.get("LLM_PROVIDER", settings.LLM_PROVIDER).lower()
+    _llm_key_map = {
+        "nvidia": ("NVIDIA_NIM_API_KEY", settings.NVIDIA_NIM_API_KEY),
+        "groq": ("GROQ_API_KEY", settings.GROQ_API_KEY),
+        "openai": ("LLM_API_KEY", settings.LLM_API_KEY),
+    }
+    if llm_provider in _llm_key_map:
+        key_name, key_value = _llm_key_map[llm_provider]
+        if not key_value:
+            logger.warning(
+                "[STARTUP] LLM_PROVIDER=%s but %s is blank — "
+                "LLM-dependent tasks (audit, scoring, pitch) will fail gracefully.",
+                llm_provider, key_name,
+            )
 
     db_ok = await _check_db()
     STARTUP_CHECKS["db"] = db_ok

@@ -159,11 +159,11 @@ class WorkerSettings:
         from app.workers import tasks
 
         return [
-            arq_func(tasks.run_discovery_task, max_tries=2),
-            arq_func(tasks.run_audit_task, max_tries=2),
-            arq_func(tasks.run_score_task, max_tries=2),
-            arq_func(tasks.run_pitch_task, max_tries=2),
-            arq_func(tasks.run_send_outreach_task, max_tries=2),
+            arq_func(tasks.run_discovery_task, name="run_discovery_task", max_tries=2),
+            arq_func(tasks.run_audit_task, name="run_audit_task", max_tries=2),
+            arq_func(tasks.run_score_task, name="run_score_task", max_tries=2),
+            arq_func(tasks.run_pitch_task, name="run_pitch_task", max_tries=2),
+            arq_func(tasks.run_send_outreach_task, name="run_send_outreach_task", max_tries=2),
         ]
 
     @classmethod

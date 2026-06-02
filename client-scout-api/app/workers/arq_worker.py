@@ -26,6 +26,14 @@ from arq.cron import cron
 from arq.worker import func as arq_func
 
 from app.config import get_settings
+from app.workers.tasks import (
+    reap_stale_jobs,
+    run_audit_task,
+    run_discovery_task,
+    run_pitch_task,
+    run_score_task,
+    run_send_outreach_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,39 +158,20 @@ class WorkerSettings:
     on_shutdown = staticmethod(on_shutdown)
     on_job_abort = staticmethod(on_job_abort)
 
-    # Lazy registration: the resolver imports the tasks module on demand so
-    # the API container can import this file (to enqueue jobs) without
-    # eagerly loading the task functions. The tasks module itself defers
-    # heavy imports (Playwright, LLM SDKs) inside each task body.
-    @classmethod
-    def _resolve_functions(cls) -> list[Any]:
-        from app.workers import tasks
+    functions = [
+        arq_func(run_discovery_task, name="run_discovery_task", max_tries=2),
+        arq_func(run_audit_task, name="run_audit_task", max_tries=2),
+        arq_func(run_score_task, name="run_score_task", max_tries=2),
+        arq_func(run_pitch_task, name="run_pitch_task", max_tries=2),
+        arq_func(run_send_outreach_task, name="run_send_outreach_task", max_tries=2),
+    ]
 
-        return [
-            arq_func(tasks.run_discovery_task, name="run_discovery_task", max_tries=2),
-            arq_func(tasks.run_audit_task, name="run_audit_task", max_tries=2),
-            arq_func(tasks.run_score_task, name="run_score_task", max_tries=2),
-            arq_func(tasks.run_pitch_task, name="run_pitch_task", max_tries=2),
-            arq_func(tasks.run_send_outreach_task, name="run_send_outreach_task", max_tries=2),
-        ]
-
-    @classmethod
-    def _resolve_cron_jobs(cls) -> list[Any]:
-        from app.workers import tasks
-
-        return [
-            cron(
-                tasks.reap_stale_jobs,
-                # Run every minute. The reaper itself filters by
-                # WORKER_STALE_JOB_THRESHOLD_SECONDS so the cadence is cheap.
-                minute=set(range(0, 60, 1)),
-                run_at_startup=True,
-            ),
-        ]
-
-
-# ARQ reads `functions` and `cron_jobs` off the WorkerSettings class at worker
-# boot. We resolve them once at import time so a future arq release that
-# inspects them via getattr(cls, ...) sees concrete lists, not properties.
-WorkerSettings.functions = WorkerSettings._resolve_functions()  # type: ignore[attr-defined]
-WorkerSettings.cron_jobs = WorkerSettings._resolve_cron_jobs()  # type: ignore[attr-defined]
+    cron_jobs = [
+        cron(
+            reap_stale_jobs,
+            # Run every minute. The reaper itself filters by
+            # WORKER_STALE_JOB_THRESHOLD_SECONDS so the cadence is cheap.
+            minute=set(range(0, 60, 1)),
+            run_at_startup=True,
+        ),
+    ]

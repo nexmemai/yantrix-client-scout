@@ -123,7 +123,7 @@ _GOSOM_CSV_COLUMNS = {
 _STUCK_PENDING_THRESHOLD_SECONDS = 30.0
 
 # Terminal states that mean the scraper will never produce results.
-_TERMINAL_SUCCESS_STATES = frozenset({"completed", "ok"})
+_TERMINAL_SUCCESS_STATES = frozenset({"completed", "ok", "done"})
 _TERMINAL_FAILURE_STATES = frozenset({"failed", "cancelled", "error", "timeout"})
 
 
@@ -146,28 +146,38 @@ class GmapsScraperClient:
     # Public API
     # ------------------------------------------------------------------
 
-    async def submit_job(self, query: str, depth: int = 1) -> str:
+    async def submit_job(self, query: str, niche: str, city: str, depth: int = 1) -> str:
         """
         Submit a scraping job.
         Returns the job ID string.
 
         :param query: Human-readable search string, e.g. "dental clinics in Pune"
+        :param niche: The canonical niche name
+        :param city: The city name
         :param depth: Pagination depth (1 = first page only; increase for more results)
         """
         payload = {
-            "name": f"scout_{query[:40].replace(' ', '_')}",
-            "keywords": [query],
+            "name": f"scout_{niche}_{city}",
+            "keywords": query,       # one keyword per line
             "lang": "en",
-            "depth": depth,
-            "max_time": 180,
+            "depth": str(depth),
+            "maxtime": "10m",
+            "zoom": "15",
+            "fastmode": "",           # empty = unchecked
+            "email": "",              # empty = unchecked
         }
         logger.info(
             "[GMAPS] submit_job url=%s payload=%r",
-            f"{self._base_url}/api/v1/jobs",
+            f"{self._base_url}/scrape",
             payload,
         )
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(f"{self._base_url}/api/v1/jobs", json=payload)
+            resp = await client.post(
+                f"{self._base_url}/scrape",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=30.0,
+            )
             logger.info(
                 "[GMAPS] submit_job response status=%d body=%s",
                 resp.status_code,
@@ -315,6 +325,8 @@ class GmapsScraperClient:
     async def wait_for_results_with_retry(
         self,
         query: str,
+        niche: str,
+        city: str,
         depth: int = 1,
         poll_interval: float = 3.0,
         max_wait: float = 120.0,
@@ -334,7 +346,7 @@ class GmapsScraperClient:
         last_exc: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
-            job_id = await self.submit_job(query, depth=depth)
+            job_id = await self.submit_job(query, niche, city, depth=depth)
             logger.info(
                 "[GMAPS] attempt %d/%d — submitted job %s for query %r",
                 attempt, max_attempts, job_id, query,

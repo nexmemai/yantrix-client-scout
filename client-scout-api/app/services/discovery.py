@@ -93,6 +93,8 @@ async def discover_businesses(
     try:
         raw_businesses = await client.wait_for_results_with_retry(
             query=query,
+            niche=niche,
+            city=city,
             depth=depth,
             max_wait=900.0,
             max_attempts=2,

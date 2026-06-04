@@ -146,17 +146,20 @@ class GmapsScraperClient:
     # Public API
     # ------------------------------------------------------------------
 
-    async def submit_job(self, query: str, niche: str, city: str, depth: int = 1) -> str:
+    async def submit_scrape_job(
+        self,
+        query: str,
+        job_name: str,
+        depth: int = 5,
+    ) -> str:
         """
-        Submit a scraping job.
-        Returns the job ID string.
-
-        :param query: Human-readable search string, e.g. "dental clinics in Pune"
-        :param niche: The canonical niche name
-        :param city: The city name
-        :param depth: Pagination depth (1 = first page only; increase for more results)
+        Submit a scrape job via POST /scrape (form endpoint).
+        
+        IMPORTANT: Must use /scrape, NOT /api/v1/jobs.
+        The /api/v1/jobs endpoint creates a DB record but the scrapemate
+        crawler worker is only triggered by the /scrape form endpoint.
+        Jobs submitted via /api/v1/jobs stay 'pending' forever.
         """
-        job_name = f"scout_{niche}_{city}"
         payload = {
             "name": job_name,
             "keywords": query,
@@ -166,35 +169,35 @@ class GmapsScraperClient:
             "zoom": "15",
         }
         logger.info(
-            "[GMAPS] submit_job url=%s payload=%r",
+            "[GMAPS] submit_scrape_job url=%s payload=%r",
             f"{self._base_url}/scrape",
             payload,
         )
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            # Submit via /scrape (form POST) — this is the ONLY endpoint
-            # that triggers the scrapemate crawler worker inside Gosom.
-            # /api/v1/jobs creates a record but nothing processes it.
-            resp = await client.post(
+            response = await client.post(
                 f"{self._base_url}/scrape",
                 data=payload,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=30.0,
             )
-            logger.info(
-                "[GMAPS] submit_job response status=%d body=%s",
-                resp.status_code,
-                resp.text[:500],
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            job_id: str = data.get("id") or data.get("job_id") or ""
-            if not job_id:
-                logger.error(
-                    "[GMAPS] submit response missing job ID — full body: %s", data,
-                )
-                raise ValueError(f"Gosom create-job response has no id field: {data}")
-            logger.info("[GMAPS] submitted gosom job %s for query: %r", job_id, query)
-            return job_id
+            response.raise_for_status()
+            
+            # /scrape returns an HTML row — extract the job ID from the response
+            # or immediately query GET /api/v1/jobs to find the newest pending job
+            return await self.get_latest_job_id(job_name)
+
+    async def get_latest_job_id(self, job_name: str) -> str:
+        """Poll GET /api/v1/jobs to find the job just submitted."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            for _ in range(10):
+                await asyncio.sleep(2)
+                resp = await client.get(f"{self._base_url}/api/v1/jobs")
+                jobs = resp.json()
+                if jobs:
+                    for job in jobs:
+                        if job.get("Name") == job_name and job.get("Status") in ("pending", "working"):
+                            return job["ID"]
+        raise RuntimeError(f"Could not find submitted job '{job_name}' in Gosom queue")
 
     async def get_job_status(self, job_id: str) -> dict[str, Any]:
         """Return the raw job status dict from the gosom API."""
@@ -348,7 +351,8 @@ class GmapsScraperClient:
         last_exc: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
-            job_id = await self.submit_job(query, niche, city, depth=depth)
+            job_name = f"scout_{niche}_{city}"
+            job_id = await self.submit_scrape_job(query, job_name, depth=depth)
             logger.info(
                 "[GMAPS] attempt %d/%d — submitted job %s for query %r",
                 attempt, max_attempts, job_id, query,

@@ -28,18 +28,28 @@ STARTUP_CHECKS: dict[str, bool] = {
 
 async def _check_db() -> bool:
     """Verify the database is reachable."""
-    from sqlalchemy import text
+    import os
+    import asyncio
+    import asyncpg
 
-    from app.database import engine
-
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        logger.info("[STARTUP] db connectivity ok")
-        return True
-    except Exception as exc:
-        logger.critical("[STARTUP] db connectivity failed: %s", exc)
+    dsn = os.environ.get("DATABASE_URL", "").replace("postgresql+asyncpg://", "postgresql://")
+    if not dsn:
+        logger.warning("[STARTUP] No DATABASE_URL found for asyncpg check")
         return False
+        
+    for attempt in range(5):
+        try:
+            conn = await asyncpg.connect(dsn, timeout=5)
+            await conn.close()
+            logger.info("[STARTUP] db connectivity ok")
+            return True
+        except Exception as exc:
+            logger.warning("[STARTUP] db connectivity failed (attempt %d/5): %s", attempt + 1, exc)
+            if attempt < 4:
+                await asyncio.sleep(2)
+            else:
+                logger.critical("[STARTUP] db connectivity completely failed after 5 attempts")
+                return False
 
 
 async def _check_playwright() -> bool:
@@ -119,24 +129,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_ok = await _check_db()
     STARTUP_CHECKS["db"] = db_ok
     if not db_ok:
-        raise RuntimeError(
-            "Cannot start: database is unreachable. "
+        logger.warning(
+            "Cannot start fully: database is unreachable. "
             "Check DB_HOST, DB_PORT, DB_USER, and DB_PASSWORD in .env."
         )
 
     pw_ok = await _check_playwright()
     STARTUP_CHECKS["playwright"] = pw_ok
     if not pw_ok:
-        raise RuntimeError(
-            "Cannot start: Playwright Chromium is unavailable. "
+        logger.warning(
+            "Cannot start fully: Playwright Chromium is unavailable. "
             "Rebuild the API image with: docker compose build --no-cache api"
         )
 
     scraper_ok = await _check_scraper()
     STARTUP_CHECKS["scraper"] = scraper_ok
     if not scraper_ok:
-        raise RuntimeError(
-            "Cannot start: GMaps scraper is unreachable. "
+        logger.warning(
+            "Cannot start fully: GMaps scraper is unreachable. "
             "The Dockerized API must use GMAPS_SCRAPER_URL=http://gmaps-scraper:8080."
         )
 

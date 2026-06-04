@@ -99,6 +99,9 @@ services:
       start_period: 45s
     networks:
       - scout
+    dns:
+      - 127.0.0.11
+    dns_search: []
 
   worker:
     build:
@@ -137,6 +140,9 @@ services:
       start_period: 30s
     networks:
       - scout
+    dns:
+      - 127.0.0.11
+    dns_search: []
 
   redis:
     image: ${REDIS_IMAGE:-redis:7-alpine}

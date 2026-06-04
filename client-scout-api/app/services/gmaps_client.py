@@ -156,15 +156,14 @@ class GmapsScraperClient:
         :param city: The city name
         :param depth: Pagination depth (1 = first page only; increase for more results)
         """
+        job_name = f"scout_{niche}_{city}"
         payload = {
-            "name": f"scout_{niche}_{city}",
-            "keywords": query,       # one keyword per line
+            "name": job_name,
+            "keywords": query,
             "lang": "en",
             "depth": str(depth),
             "maxtime": "10m",
             "zoom": "15",
-            "fastmode": "",           # empty = unchecked
-            "email": "",              # empty = unchecked
         }
         logger.info(
             "[GMAPS] submit_job url=%s payload=%r",
@@ -172,6 +171,9 @@ class GmapsScraperClient:
             payload,
         )
         async with httpx.AsyncClient(timeout=self._timeout) as client:
+            # Submit via /scrape (form POST) — this is the ONLY endpoint
+            # that triggers the scrapemate crawler worker inside Gosom.
+            # /api/v1/jobs creates a record but nothing processes it.
             resp = await client.post(
                 f"{self._base_url}/scrape",
                 data=payload,
